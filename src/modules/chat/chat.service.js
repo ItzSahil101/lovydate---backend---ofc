@@ -1,5 +1,6 @@
 const chatRepo = require('./chat.repository');
 const { emitToConversation } = require('../../infrastructure/websocket/socketServer');
+const { sendPushToUser } = require('../../infrastructure/firebase/fcm');
 const { encodeCursor, decodeCursor } = require('../../shared/cursor');
 const { ForbiddenError, NotFoundError, BadRequestError } = require('../../shared/errors');
 const { isUuid } = require('../../shared/ids');
@@ -119,6 +120,26 @@ async function sendMessage(conversationId, senderId, payload = {}) {
     durationSeconds: message.durationSeconds,
     createdAt: message.createdAt,
   });
+
+  try {
+    const details = await chatRepo.getConversationDetails(conversationId, senderId);
+    if (details && details.partnerUserId) {
+      const senderName = details.partnerName ? details.partnerName : 'Someone';
+      const preview = type === 'text'
+        ? (content.length > 80 ? content.slice(0, 80) + '…' : content)
+        : (type === 'image' ? '📷 Sent a photo' : (type === 'audio' ? '🎤 Sent a voice message' : '🎥 Sent a video'));
+
+      sendPushToUser(details.partnerUserId, {
+        title: 'New message from ' + (details.displayName || 'your match'),
+        body: preview,
+        data: {
+          type: 'chat',
+          conversationId,
+          senderId,
+        },
+      }).catch(() => {});
+    }
+  } catch (_) {}
 
   return message;
 }

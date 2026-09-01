@@ -1,4 +1,5 @@
 const likesRepo = require('./likes.repository');
+const notificationRepo = require('../notifications/notifications.repository');
 const redis = require('../../infrastructure/redis/client');
 const { CACHE_KEYS } = require('../../config/constants');
 const { emitToUser } = require('../../infrastructure/websocket/socketServer');
@@ -43,12 +44,45 @@ async function likeUser(sourceUserId, targetUserId) {
       partnerUserId: sourceUserId,
     });
 
+    notificationRepo.createNotification({
+      recipientId: targetUserId,
+      senderId: sourceUserId,
+      type: 'match',
+      entityId: result.match.conversationId,
+      message: "It's a Match! Start chatting now.",
+    }).catch(() => {});
+
+    notificationRepo.createNotification({
+      recipientId: sourceUserId,
+      senderId: targetUserId,
+      type: 'match',
+      entityId: result.match.conversationId,
+      message: "It's a Match! Start chatting now.",
+    }).catch(() => {});
+
     sendPushToUser(targetUserId, {
       title: "It's a Match! 🎉",
       body: 'You have a new mutual match on LövyDate! Tap to start chatting.',
       data: {
         type: 'match',
         conversationId: result.match.conversationId,
+      },
+    }).catch(() => {});
+  } else {
+    // Single Like notification
+    notificationRepo.createNotification({
+      recipientId: targetUserId,
+      senderId: sourceUserId,
+      type: 'like',
+      message: 'liked your profile!',
+    }).catch(() => {});
+
+    sendPushToUser(targetUserId, {
+      title: 'New Like! ❤️',
+      body: 'Someone liked your profile on LövyDate!',
+      data: {
+        type: 'like',
+        senderId: sourceUserId,
       },
     }).catch(() => {});
   }
