@@ -1,0 +1,80 @@
+const feedService = require('./feed.service');
+const { success } = require('../../shared/response');
+
+async function getFeed(req, res, next) {
+  try {
+    const limit = parseInt(req.query.limit || '20', 10);
+    const posts = await feedService.getFeed(req.user.userId, limit);
+    return success(res, posts);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createPost(req, res, next) {
+  try {
+    const post = await feedService.createPost(req.user.userId, req.body);
+    return success(res, post, 201);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deletePost(req, res, next) {
+  try {
+    const result = await feedService.deletePost(req.user.userId, req.params.postId);
+    return success(res, { deleted: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function reportPost(req, res, next) {
+  try {
+    const result = await feedService.reportPost(req.user.userId, req.params.postId, req.body.reason);
+    return success(res, result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function toggleLike(req, res, next) {
+  try {
+    const result = await feedService.toggleLike(req.user.userId, req.params.postId);
+    return success(res, result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getComments(req, res, next) {
+  try {
+    const comments = await feedService.getComments(req.params.postId);
+    return success(res, comments);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function addComment(req, res, next) {
+  try {
+    const comment = await feedService.addComment(
+      req.user.userId,
+      req.params.postId,
+      req.body.commentText || req.body.text
+    );
+    return success(res, comment, 201);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  getFeed,
+  createPost,
+  deletePost,
+  reportPost,
+  toggleLike,
+  getComments,
+  addComment,
+};

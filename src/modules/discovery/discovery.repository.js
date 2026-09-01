@@ -1,0 +1,104 @@
+const { query } = require('../../infrastructure/database/pool');
+
+async function getUserPreferencesAndLocation(userId) {
+  const res = await query(
+    `SELECT
+       up.interested_in AS "interestedIn",
+       up.min_age AS "minAge",
+       up.max_age AS "maxAge",
+       up.max_distance_meters AS "maxDistanceMeters",
+       up.allow_outside_preferences AS "allowOutsidePreferences",
+       p.gender AS "userGender",
+       EXTRACT(YEAR FROM AGE(p.date_of_birth))::int AS "userAge",
+       ul.latitude,
+       ul.longitude
+     FROM user_preferences up
+     JOIN profiles p ON p.user_id = up.user_id
+     LEFT JOIN user_locations ul ON ul.user_id = up.user_id
+     WHERE up.user_id = $1`,
+    [userId]
+  );
+  return res.rows[0] || null;
+}
+
+async function findCandidateUserIds(userId, prefs, limit = 100) {
+  const values = [userId];
+  let idx = 2;
+
+  let genderClause = '';
+  if (prefs.interestedIn && prefs.interestedIn.length > 0 && !prefs.interestedIn.includes('Everyone')) {
+    genderClause = `AND p.gender = ANY($${idx++}::varchar[])`;
+    values.push(prefs.interestedIn);
+  }
+
+  let ageClause = '';
+  if (prefs.minAge && prefs.maxAge && !prefs.allowOutsidePreferences) {
+    ageClause = `AND p.date_of_birth <= (CURRENT_DATE - ($${idx++} * INTERVAL '1 year'))
+                 AND p.date_of_birth >= (CURRENT_DATE - (($${idx++} + 1) * INTERVAL '1 year'))`;
+    values.push(prefs.minAge, prefs.maxAge);
+  }
+
+  let goalClause = '';
+  if (prefs.relationshipGoal) {
+    goalClause = `AND p.relationship_goal = $${idx++}`;
+    values.push(prefs.relationshipGoal);
+  }
+
+  let geoClause = '';
+  if (prefs.latitude != null && prefs.longitude != null && prefs.maxDistanceMeters && !prefs.allowOutsidePreferences) {
+    const maxDistKm = prefs.maxDistanceMeters / 1000.0;
+    geoClause = `AND ul.latitude IS NOT NULL
+                 AND (
+                   6371 * acos(
+                     cos(radians($${idx++})) * cos(radians(ul.latitude)) *
+                     cos(radians(ul.longitude) - radians($${idx++})) +
+                     sin(radians($${idx++})) * sin(radians(ul.latitude))
+                   )
+                 ) <= $${idx++}`;
+    values.push(prefs.latitude, prefs.longitude, prefs.latitude, maxDistKm);
+  }
+
+  values.push(limit);
+  const limitIdx = idx++;
+
+  const sql = `
+    SELECT p.user_id AS "userId"
+    FROM profiles p
+    JOIN users u ON u.id = p.user_id AND u.status = 'active'
+    LEFT JOIN user_locations ul ON ul.user_id = p.user_id
+    WHERE p.user_id != $1
+      AND p.onboarding_completed = TRUE
+      ${genderClause}
+      ${ageClause}
+      ${goalClause}
+      ${geoClause}
+      AND NOT EXISTS (
+        SELECT 1 FROM likes l
+        WHERE l.source_user_id = $1 AND l.target_user_id = p.user_id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM passes ps
+        WHERE ps.source_user_id = $1 AND ps.target_user_id = p.user_id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM matches m
+        WHERE (m.user_one_id = $1 AND m.user_two_id = p.user_id)
+           OR (m.user_two_id = $1 AND m.user_one_id = p.user_id)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = p.user_id)
+           OR (b.blocker_user_id = p.user_id AND b.blocked_user_id = $1)
+      )
+    ORDER BY p.last_active_at DESC
+    LIMIT $${limitIdx}
+  `;
+
+  const res = await query(sql, values);
+  return res.rows.map((r) => r.userId);
+}
+
+module.exports = {
+  getUserPreferencesAndLocation,
+  findCandidateUserIds,
+};

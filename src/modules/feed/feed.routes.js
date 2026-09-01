@@ -1,0 +1,16 @@
+const express = require('express');
+const router = express.Router();
+const feedController = require('./feed.controller');
+const { requireAuth } = require('../../middleware/auth');
+
+router.use(requireAuth);
+
+router.get('/', feedController.getFeed);
+router.post('/', feedController.createPost);
+router.delete('/:postId', feedController.deletePost);
+router.post('/:postId/report', feedController.reportPost);
+router.post('/:postId/like', feedController.toggleLike);
+router.get('/:postId/comments', feedController.getComments);
+router.post('/:postId/comments', feedController.addComment);
+
+module.exports = router;
