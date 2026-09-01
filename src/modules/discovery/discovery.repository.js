@@ -104,8 +104,10 @@ async function findCandidateUserIds(userId, prefs, limit = 100) {
     FROM profiles p
     JOIN users u ON u.id = p.user_id AND u.status = 'active'
     LEFT JOIN user_locations ul ON ul.user_id = p.user_id
+    LEFT JOIN user_preferences cand_up ON cand_up.user_id = p.user_id
     WHERE p.user_id != $1
       AND p.onboarding_completed = TRUE
+      AND COALESCE(cand_up.is_incognito, FALSE) = FALSE
       ${genderClause}
       ${ageClause}
       ${goalClause}

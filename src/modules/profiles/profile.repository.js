@@ -156,30 +156,32 @@ async function getProfilesBatch(userIds, viewerUserId = null) {
        p.bio,
        ul.city,
        (u.email_verified_at IS NOT NULL) AS "isVerified",
-       CASE
-         WHEN viewer.latitude IS NOT NULL AND viewer.longitude IS NOT NULL
-              AND ul.latitude IS NOT NULL AND ul.longitude IS NOT NULL
-         THEN ROUND(
-           6371 * ACOS(
-             LEAST(1.0, GREATEST(-1.0,
-               COS(RADIANS(viewer.latitude)) * COS(RADIANS(ul.latitude)) *
-               COS(RADIANS(ul.longitude) - RADIANS(viewer.longitude)) +
-               SIN(RADIANS(viewer.latitude)) * SIN(RADIANS(ul.latitude))
-             ))
-           )
-         )::int
-         ELSE NULL
-       END AS "distanceKm"
-     FROM profiles p
-     JOIN users u ON u.id = p.user_id
-     LEFT JOIN user_locations ul ON ul.user_id = p.user_id
-     LEFT JOIN user_locations viewer ON viewer.user_id = $2
-     WHERE p.user_id = ANY($1::uuid[]) AND p.onboarding_completed = TRUE
-       AND NOT EXISTS (
-         SELECT 1 FROM blocks b
-         WHERE (b.blocker_user_id = $2 AND b.blocked_user_id = p.user_id)
-            OR (b.blocked_user_id = $2 AND b.blocker_user_id = p.user_id)
-       )`,
+        CASE
+          WHEN COALESCE(cand_up.show_distance, TRUE) = FALSE OR COALESCE(cand_up.is_incognito, FALSE) = TRUE THEN NULL
+          WHEN viewer.latitude IS NOT NULL AND viewer.longitude IS NOT NULL
+               AND ul.latitude IS NOT NULL AND ul.longitude IS NOT NULL
+          THEN ROUND(
+            6371 * ACOS(
+              LEAST(1.0, GREATEST(-1.0,
+                COS(RADIANS(viewer.latitude)) * COS(RADIANS(ul.latitude)) *
+                COS(RADIANS(ul.longitude) - RADIANS(viewer.longitude)) +
+                SIN(RADIANS(viewer.latitude)) * SIN(RADIANS(ul.latitude))
+              ))
+            )
+          )::int
+          ELSE NULL
+        END AS "distanceKm"
+      FROM profiles p
+      JOIN users u ON u.id = p.user_id
+      LEFT JOIN user_locations ul ON ul.user_id = p.user_id
+      LEFT JOIN user_locations viewer ON viewer.user_id = $2
+      LEFT JOIN user_preferences cand_up ON cand_up.user_id = p.user_id
+      WHERE p.user_id = ANY($1::uuid[]) AND p.onboarding_completed = TRUE
+        AND NOT EXISTS (
+          SELECT 1 FROM blocks b
+          WHERE (b.blocker_user_id = $2 AND b.blocked_user_id = p.user_id)
+             OR (b.blocked_user_id = $2 AND b.blocker_user_id = p.user_id)
+        )`,
     [userIds, viewerUserId]
   );
 
@@ -361,6 +363,43 @@ async function getProfileByName(displayName, viewerUserId = null) {
   return getProfileByUserId(check.rows[0].user_id);
 }
 
+async function getPrivacySettings(userId) {
+  const sql = `
+    SELECT
+      COALESCE(is_incognito, FALSE) AS "isIncognito",
+      COALESCE(show_online, TRUE) AS "showOnline",
+      COALESCE(show_distance, TRUE) AS "showDistance"
+    FROM user_preferences
+    WHERE user_id = $1
+  `;
+  const res = await query(sql, [userId]);
+  return res.rows[0] || { isIncognito: false, showOnline: true, showDistance: true };
+}
+
+async function updatePrivacySettings(userId, { isIncognito, showOnline, showDistance }) {
+  const current = await getPrivacySettings(userId);
+  const nextIncognito = isIncognito !== undefined ? Boolean(isIncognito) : current.isIncognito;
+  const nextShowOnline = showOnline !== undefined ? Boolean(showOnline) : current.showOnline;
+  const nextShowDistance = showDistance !== undefined ? Boolean(showDistance) : current.showDistance;
+
+  const sql = `
+    INSERT INTO user_preferences (user_id, is_incognito, show_online, show_distance, updated_at)
+    VALUES ($1, $2, $3, $4, NOW())
+    ON CONFLICT (user_id)
+    DO UPDATE SET
+      is_incognito = EXCLUDED.is_incognito,
+      show_online = EXCLUDED.show_online,
+      show_distance = EXCLUDED.show_distance,
+      updated_at = NOW()
+    RETURNING
+      is_incognito AS "isIncognito",
+      show_online AS "showOnline",
+      show_distance AS "showDistance"
+  `;
+  const res = await query(sql, [userId, nextIncognito, nextShowOnline, nextShowDistance]);
+  return res.rows[0];
+}
+
 module.exports = {
   getProfileByUserId,
   getProfilesBatch,
@@ -368,4 +407,6 @@ module.exports = {
   searchProfiles,
   getProfileByName,
   areUsersBlocked,
+  getPrivacySettings,
+  updatePrivacySettings,
 };

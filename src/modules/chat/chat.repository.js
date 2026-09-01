@@ -79,8 +79,8 @@ async function getConversationDetails(conversationId, userId) {
       EXTRACT(YEAR FROM AGE(p.date_of_birth))::int AS "partnerAge",
       ul.city AS "partnerCity",
       p.bio AS "partnerBio",
-      p.last_active_at AS "partnerLastActiveAt",
-      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '3 minutes') AS "partnerIsOnline",
+      CASE WHEN COALESCE(up.show_online, TRUE) = FALSE OR COALESCE(up.is_incognito, FALSE) = TRUE THEN NULL ELSE p.last_active_at END AS "partnerLastActiveAt",
+      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '3 minutes' AND COALESCE(up.show_online, TRUE) = TRUE AND COALESCE(up.is_incognito, FALSE) = FALSE) AS "partnerIsOnline",
       (
         SELECT url FROM profile_photos
         WHERE user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END
@@ -93,6 +93,7 @@ async function getConversationDetails(conversationId, userId) {
     JOIN matches m ON m.id = c.match_id
     JOIN profiles p ON p.user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END
     LEFT JOIN user_locations ul ON ul.user_id = p.user_id
+    LEFT JOIN user_preferences up ON up.user_id = p.user_id
     LEFT JOIN conversation_members partner_cm ON partner_cm.conversation_id = c.id AND partner_cm.user_id != $1
     WHERE cm.conversation_id = $2 AND cm.user_id = $1
   `;

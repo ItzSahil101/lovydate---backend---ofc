@@ -97,6 +97,17 @@ async function getProfileByName(displayName, viewerUserId) {
   };
 }
 
+async function getPrivacy(userId) {
+  return profileRepo.getPrivacySettings(userId);
+}
+
+async function updatePrivacy(userId, patch) {
+  const result = await profileRepo.updatePrivacySettings(userId, patch);
+  await redis.del(CACHE_KEYS.PROFILE(userId)).catch(() => {});
+  await redis.del(CACHE_KEYS.DISCOVERY_CANDIDATES(userId)).catch(() => {});
+  return result;
+}
+
 module.exports = {
   getPublicProfile,
   getMyProfile,
@@ -104,4 +115,6 @@ module.exports = {
   updateMyProfile,
   searchProfiles,
   getProfileByName,
+  getPrivacy,
+  updatePrivacy,
 };

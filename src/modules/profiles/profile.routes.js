@@ -10,6 +10,8 @@ router.use(requireAuth);
 
 router.get('/me', profileController.getMe);
 router.patch('/me', validate(profilePatchSchema), profileController.updateMe);
+router.get('/privacy', profileController.getPrivacy);
+router.patch('/privacy', profileController.updatePrivacy);
 router.get(
   '/search',
   rateLimiter({ action: 'profiles-search', max: 120, windowSeconds: 60 }),

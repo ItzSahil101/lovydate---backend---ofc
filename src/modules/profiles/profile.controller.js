@@ -59,6 +59,24 @@ async function updateMe(req, res, next) {
   }
 }
 
+async function getPrivacy(req, res, next) {
+  try {
+    const privacy = await profileService.getPrivacy(req.user.userId);
+    return success(res, privacy);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updatePrivacy(req, res, next) {
+  try {
+    const updated = await profileService.updatePrivacy(req.user.userId, req.body);
+    return success(res, updated);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getMe,
   getProfileById,
@@ -66,4 +84,6 @@ module.exports = {
   searchProfiles,
   getBatch,
   updateMe,
+  getPrivacy,
+  updatePrivacy,
 };

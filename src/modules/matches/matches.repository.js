@@ -118,8 +118,8 @@ async function getMatchesSummary(userId) {
       ul.city,
       ul.country_code AS "countryCode",
       (u.email_verified_at IS NOT NULL) AS "isVerified",
-      p.last_active_at AS "lastActiveAt",
-      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '3 minutes') AS "isOnline",
+      CASE WHEN COALESCE(up.show_online, TRUE) = FALSE OR COALESCE(up.is_incognito, FALSE) = TRUE THEN NULL ELSE p.last_active_at END AS "lastActiveAt",
+      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '3 minutes' AND COALESCE(up.show_online, TRUE) = TRUE AND COALESCE(up.is_incognito, FALSE) = FALSE) AS "isOnline",
       c.id AS "conversationId",
       (
         SELECT url FROM profile_photos
@@ -130,6 +130,7 @@ async function getMatchesSummary(userId) {
     JOIN profiles p ON p.user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END
     JOIN users u ON u.id = p.user_id
     LEFT JOIN user_locations ul ON ul.user_id = p.user_id
+    LEFT JOIN user_preferences up ON up.user_id = p.user_id
     LEFT JOIN conversations c ON c.match_id = m.id
     WHERE (m.user_one_id = $1 OR m.user_two_id = $1)
       AND NOT EXISTS (
