@@ -17,10 +17,16 @@ async function blockUser(blockerId, blockedId) {
 }
 
 async function unblockUser(blockerId, blockedId) {
+  await redis.del(CACHE_KEYS.DISCOVERY_CANDIDATES(blockerId)).catch(() => {});
   return blocksRepo.deleteBlock(blockerId, blockedId);
+}
+
+async function getBlockedUsers(userId) {
+  return blocksRepo.getBlockedUsers(userId);
 }
 
 module.exports = {
   blockUser,
   unblockUser,
+  getBlockedUsers,
 };

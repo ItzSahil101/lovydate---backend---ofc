@@ -10,16 +10,28 @@ async function insertBlock(blockerId, blockedId) {
   return { blocked: true };
 }
 
-async function deleteBlock(blockerId, blockedId) {
-  await query(
-    `DELETE FROM blocks
-     WHERE blocker_user_id = $1 AND blocked_user_id = $2`,
-    [blockerId, blockedId]
+async function getBlockedUsers(userId) {
+  const res = await query(
+    `SELECT
+       b.blocked_user_id AS "userId",
+       b.created_at AS "blockedAt",
+       prof.display_name AS "displayName",
+       (
+         SELECT url FROM profile_photos
+         WHERE user_id = b.blocked_user_id
+         ORDER BY display_order ASC LIMIT 1
+       ) AS "avatarUrl"
+     FROM blocks b
+     JOIN profiles prof ON prof.user_id = b.blocked_user_id
+     WHERE b.blocker_user_id = $1
+     ORDER BY b.created_at DESC`,
+    [userId]
   );
-  return { unblocked: true };
+  return res.rows;
 }
 
 module.exports = {
   insertBlock,
   deleteBlock,
+  getBlockedUsers,
 };

@@ -63,6 +63,11 @@ async function getFeedPosts(userId, limit = 20) {
     FROM posts p
     JOIN profiles prof ON prof.user_id = p.user_id
     JOIN users u ON u.id = p.user_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM blocks b
+      WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = p.user_id)
+         OR (b.blocker_user_id = p.user_id AND b.blocked_user_id = $1)
+    )
     ORDER BY
       CASE
         WHEN p.user_id = $1 THEN 0
