@@ -12,6 +12,9 @@ async function getFeed(req, res, next) {
     if (req.query.maxAge) filterOverrides.maxAge = req.query.maxAge;
     if (req.query.maxDistanceKm) filterOverrides.maxDistanceKm = req.query.maxDistanceKm;
     if (req.query.relationshipGoal) filterOverrides.relationshipGoal = req.query.relationshipGoal;
+    if (req.query.verifiedOnly !== undefined) {
+      filterOverrides.verifiedOnly = req.query.verifiedOnly === 'true';
+    }
 
     const result = await discoveryService.getDiscoveryFeed(
       req.user.userId,

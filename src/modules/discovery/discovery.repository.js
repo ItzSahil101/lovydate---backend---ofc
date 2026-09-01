@@ -58,6 +58,34 @@ async function findCandidateUserIds(userId, prefs, limit = 100) {
     values.push(prefs.latitude, prefs.longitude, prefs.latitude, maxDistKm);
   }
 
+  let verifiedClause = '';
+  if (prefs.verifiedOnly === true || prefs.verifiedOnly === 'true') {
+    verifiedClause = 'AND u.email_verified_at IS NOT NULL';
+  }
+
+  let orderClause = 'ORDER BY p.last_active_at DESC';
+  if (prefs.latitude != null && prefs.longitude != null) {
+    const latIdx1 = idx++;
+    const lonIdx = idx++;
+    const latIdx2 = idx++;
+    values.push(prefs.latitude, prefs.longitude, prefs.latitude);
+    orderClause = `ORDER BY
+      CASE
+        WHEN ul.latitude IS NOT NULL AND ul.longitude IS NOT NULL
+        THEN (
+          6371 * ACOS(
+            LEAST(1.0, GREATEST(-1.0,
+              COS(RADIANS($${latIdx1})) * COS(RADIANS(ul.latitude)) *
+              COS(RADIANS(ul.longitude) - RADIANS($${lonIdx})) +
+              SIN(RADIANS($${latIdx2})) * SIN(RADIANS(ul.latitude))
+            ))
+          )
+        )
+        ELSE 999999
+      END ASC,
+      p.last_active_at DESC`;
+  }
+
   values.push(limit);
   const limitIdx = idx++;
 
@@ -72,6 +100,7 @@ async function findCandidateUserIds(userId, prefs, limit = 100) {
       ${ageClause}
       ${goalClause}
       ${geoClause}
+      ${verifiedClause}
       AND NOT EXISTS (
         SELECT 1 FROM likes l
         WHERE l.source_user_id = $1 AND l.target_user_id = p.user_id
@@ -90,7 +119,7 @@ async function findCandidateUserIds(userId, prefs, limit = 100) {
         WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = p.user_id)
            OR (b.blocker_user_id = p.user_id AND b.blocked_user_id = $1)
       )
-    ORDER BY p.last_active_at DESC
+    ${orderClause}
     LIMIT $${limitIdx}
   `;
 

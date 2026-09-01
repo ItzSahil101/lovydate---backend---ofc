@@ -50,8 +50,12 @@ async function updateUserLocation(userId, { latitude, longitude, city = null, co
 async function completeOnboarding(userId, data) {
   return withTransaction(async (client) => {
     await client.query(
-      `INSERT INTO profiles (user_id, display_name, date_of_birth, gender, custom_gender, relationship_goal, bio, onboarding_completed, last_active_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW(), NOW())
+      `INSERT INTO profiles (
+         user_id, display_name, date_of_birth, gender, custom_gender,
+         relationship_goal, bio, occupation, height_cm, smoking, drinking, pets,
+         onboarding_completed, last_active_at, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE, NOW(), NOW())
        ON CONFLICT (user_id)
        DO UPDATE SET
          display_name = EXCLUDED.display_name,
@@ -60,6 +64,11 @@ async function completeOnboarding(userId, data) {
          custom_gender = EXCLUDED.custom_gender,
          relationship_goal = EXCLUDED.relationship_goal,
          bio = EXCLUDED.bio,
+         occupation = COALESCE(EXCLUDED.occupation, profiles.occupation),
+         height_cm = COALESCE(EXCLUDED.height_cm, profiles.height_cm),
+         smoking = COALESCE(EXCLUDED.smoking, profiles.smoking),
+         drinking = COALESCE(EXCLUDED.drinking, profiles.drinking),
+         pets = COALESCE(EXCLUDED.pets, profiles.pets),
          onboarding_completed = TRUE,
          last_active_at = NOW(),
          updated_at = NOW()`,
@@ -71,6 +80,11 @@ async function completeOnboarding(userId, data) {
         data.basicInfo.customGender || null,
         data.preferences.relationshipGoal,
         data.about?.bio || null,
+        data.about?.occupation || null,
+        data.about?.heightCm || null,
+        data.about?.smoking || null,
+        data.about?.drinking || null,
+        data.about?.pets || null,
       ]
     );
 

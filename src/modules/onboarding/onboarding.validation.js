@@ -35,6 +35,11 @@ const interestsSchema = Joi.object({
 
 const aboutSchema = Joi.object({
   bio: Joi.string().max(300).allow('').optional(),
+  occupation: Joi.string().trim().max(100).allow('').optional(),
+  heightCm: Joi.number().integer().min(0).max(300).allow(null).optional(),
+  smoking: Joi.string().trim().max(50).allow('').optional(),
+  drinking: Joi.string().trim().max(50).allow('').optional(),
+  pets: Joi.string().trim().max(50).allow('').optional(),
 });
 
 const discoverySchema = Joi.object({

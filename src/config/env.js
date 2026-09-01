@@ -21,4 +21,11 @@ module.exports = {
   cors: {
     origin: process.env.CORS_ORIGIN || '*',
   },
+  s3: {
+    endpoint: process.env.S3_ENDPOINT || 'https://minio.lovydate.fun',
+    bucket: process.env.S3_BUCKET || 'images',
+    accessKey: process.env.S3_ACCESS_KEY || 'lovydate-app',
+    secretKey: process.env.S3_SECRET_KEY || '',
+    region: process.env.S3_REGION || 'us-east-1',
+  },
 };

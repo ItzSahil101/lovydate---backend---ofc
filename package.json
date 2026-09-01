@@ -8,11 +8,15 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "migrate": "node src/infrastructure/database/migrate.js",
+    "clean": "node src/infrastructure/database/clean_db.js",
+    "clean:s3": "node src/infrastructure/s3/clear_s3.js",
     "seed": "node src/infrastructure/database/seed_profiles.js",
     "test": "jest tests/unit.test.js --forceExit",
-    "test:e2e": "jest tests/*.test.js --runInBand --detectOpenHandles --forceExit"
+    "test:e2e": "jest tests/*.test.js --runInBand --detectOpenHandles --forceExit",
+    "transfer:s3": "node src/infrastructure/s3/migrate_uploads_to_s3.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1123.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.41.0",
     "cors": "^2.8.5",

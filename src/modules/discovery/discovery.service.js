@@ -19,6 +19,7 @@ async function generateCandidatePool(userId, filterOverrides = null) {
     if (filterOverrides.maxAge) prefs.maxAge = parseInt(filterOverrides.maxAge, 10);
     if (filterOverrides.maxDistanceKm) prefs.maxDistanceMeters = parseInt(filterOverrides.maxDistanceKm, 10) * 1000;
     if (filterOverrides.relationshipGoal) prefs.relationshipGoal = filterOverrides.relationshipGoal;
+    if (filterOverrides.verifiedOnly !== undefined) prefs.verifiedOnly = filterOverrides.verifiedOnly;
     prefs.allowOutsidePreferences = false;
   }
 
@@ -117,6 +118,15 @@ async function getDiscoveryFeed(userId, limit = DISCOVERY.DEFAULT_PAGE_SIZE, cur
       photos: p.photos && p.photos.length > 0 ? p.photos.map((ph) => ph.url || ph) : [],
       interests: p.interests && p.interests.length > 0 ? p.interests.map((i) => i.name || i) : [],
     }));
+
+  orderedProfiles.sort((a, b) => {
+    if (a.distanceKm != null && b.distanceKm != null) {
+      return a.distanceKm - b.distanceKm;
+    }
+    if (a.distanceKm != null) return -1;
+    if (b.distanceKm != null) return 1;
+    return 0;
+  });
 
   const nextOffset = offset + orderedProfiles.length;
   const hasMore = orderedProfiles.length >= clampedLimit;

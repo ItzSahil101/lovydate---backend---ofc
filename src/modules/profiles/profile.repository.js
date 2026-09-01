@@ -7,13 +7,16 @@ function calculateCompletion(profile) {
   if (profile.gender) score += 10;
   if (profile.city) score += 10;
   if (Array.isArray(profile.photos)) {
-    if (profile.photos.length >= 2) score += 30;
-    else if (profile.photos.length === 1) score += 15;
+    if (profile.photos.length >= 2) score += 20;
+    else if (profile.photos.length === 1) score += 10;
   }
   if (Array.isArray(profile.interests) && profile.interests.length >= 3) {
     score += 10;
   }
   if (profile.bio && profile.bio.trim().length > 0) {
+    score += 10;
+  }
+  if (profile.heightCm || profile.smoking || profile.drinking || profile.occupation) {
     score += 10;
   }
   return Math.min(100, Math.round(score));

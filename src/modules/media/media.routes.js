@@ -1,23 +1,12 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 const router = express.Router();
 const mediaController = require('./media.controller');
-const { uploadsDir } = require('./media.service');
 const { requireAuth } = require('../../middleware/auth');
 const { rateLimiter } = require('../../middleware/rateLimiter');
 const { BadRequestError } = require('../../shared/errors');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-    cb(null, `${uuidv4()}${ext}`);
-  },
-});
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];

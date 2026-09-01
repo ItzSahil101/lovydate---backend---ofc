@@ -1,4 +1,3 @@
-const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -30,8 +29,6 @@ app.use(helmet({
 app.use(cors({ origin: env.cors.origin }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 if (env.nodeEnv !== 'test') {
   app.use(morgan('dev'));

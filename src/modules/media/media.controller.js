@@ -1,4 +1,4 @@
-const { getPhotoUrl } = require('./media.service');
+const { uploadFileToS3 } = require('./media.service');
 const { success } = require('../../shared/response');
 const { BadRequestError } = require('../../shared/errors');
 
@@ -7,12 +7,12 @@ async function uploadSingle(req, res, next) {
     if (!req.file) {
       throw new BadRequestError('No image file provided', 'FILE_REQUIRED');
     }
-    const url = getPhotoUrl(req, req.file.filename);
+    const uploaded = await uploadFileToS3(req.file);
     return success(res, {
-      url,
-      filename: req.file.filename,
-      size: req.file.size,
-      mimetype: req.file.mimetype,
+      url: uploaded.url,
+      filename: uploaded.key,
+      size: uploaded.size,
+      mimetype: uploaded.mimetype,
     }, 201);
   } catch (err) {
     next(err);
@@ -24,13 +24,21 @@ async function uploadMultiple(req, res, next) {
     if (!req.files || req.files.length === 0) {
       throw new BadRequestError('No image files provided', 'FILES_REQUIRED');
     }
-    const photos = req.files.map((file) => ({
-      url: getPhotoUrl(req, file.filename),
-      filename: file.filename,
-      size: file.size,
-      mimetype: file.mimetype,
-    }));
-    return success(res, { photos }, 201);
+    const photos = await Promise.all(
+      req.files.map((file) => uploadFileToS3(file))
+    );
+    return success(
+      res,
+      {
+        photos: photos.map((p) => ({
+          url: p.url,
+          filename: p.key,
+          size: p.size,
+          mimetype: p.mimetype,
+        })),
+      },
+      201
+    );
   } catch (err) {
     next(err);
   }
