@@ -12,4 +12,10 @@ router.get(
   discoveryController.getFeed
 );
 
+router.get(
+  '/feed',
+  rateLimiter({ action: 'discovery-feed', max: 120, windowSeconds: 60 }),
+  discoveryController.getFeed
+);
+
 module.exports = router;

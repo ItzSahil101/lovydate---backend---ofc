@@ -9,6 +9,8 @@ const { initWorkers } = require('./infrastructure/queue/workers');
 const discoveryService = require('./modules/discovery/discovery.service');
 const profileService = require('./modules/profiles/profile.service');
 
+const { runMigrations } = require('./infrastructure/database/migrate');
+
 const server = http.createServer(app);
 
 initSocketServer(server);
@@ -18,9 +20,19 @@ const workers = initWorkers({
   profileService,
 });
 
-server.listen(env.port, () => {
-  console.log(`LovyDate Production Backend listening on port ${env.port} (${env.nodeEnv})`);
-});
+async function startServer() {
+  try {
+    await runMigrations();
+  } catch (e) {
+    console.error('Migration initialization warning:', e.message);
+  }
+
+  server.listen(env.port, () => {
+    console.log(`LovyDate Production Backend listening on port ${env.port} (${env.nodeEnv})`);
+  });
+}
+
+startServer();
 
 async function gracefulShutdown(signal) {
   console.log(`Received ${signal}. Shutting down gracefully...`);

@@ -59,6 +59,15 @@ async function logout(req, res, next) {
   }
 }
 
+async function googleAuth(req, res, next) {
+  try {
+    const result = await authService.googleAuth(req.body);
+    return success(res, result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   requestCode,
   verifyCode,
@@ -66,4 +75,5 @@ module.exports = {
   resetPassword,
   refreshToken,
   logout,
+  googleAuth,
 };

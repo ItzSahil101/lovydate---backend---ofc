@@ -265,6 +265,31 @@ async function logout(rawRefreshToken, userId) {
   return { loggedOut: true };
 }
 
+async function googleAuth(googleUser = {}) {
+  const email = (googleUser.email || 'google_user@lovydate.com').trim().toLowerCase();
+  let user = await authRepo.findUserByEmail(email);
+  let isNewUser = false;
+
+  if (!user) {
+    user = await authRepo.createUserWithEmail(email);
+    isNewUser = true;
+  }
+
+  const tokens = generateTokens(user);
+  await authRepo.storeRefreshToken(user.id, tokens.tokenHash, tokens.expiresAt);
+
+  return {
+    isNewUser,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: googleUser.name || 'Google User',
+    },
+  };
+}
+
 module.exports = {
   requestCode,
   verifyCode,
@@ -272,4 +297,5 @@ module.exports = {
   resetPasswordAndLogin,
   refreshToken,
   logout,
+  googleAuth,
 };

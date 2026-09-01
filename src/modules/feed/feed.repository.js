@@ -35,7 +35,17 @@ async function getFeedPosts(userId, limit = 20) {
     LIMIT $2
   `;
 
-  const res = await query(sql, [userId, limit]);
+  let res;
+  try {
+    res = await query(sql, [userId, limit]);
+  } catch (err) {
+    if (err.message && err.message.includes('is_edited')) {
+      await query(`ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
+      res = await query(sql, [userId, limit]);
+    } else {
+      throw err;
+    }
+  }
   const posts = res.rows;
 
   if (posts.length === 0) return [];
