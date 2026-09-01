@@ -3,6 +3,37 @@ const { UnauthorizedError, NotFoundError } = require('../../shared/errors');
 const notificationService = require('../notifications/notifications.service');
 
 async function getFeedPosts(userId, limit = 20) {
+  // Determine viewer's preferred gender for feed prioritization
+  const preferredGenders = [];
+  try {
+    const userPrefRes = await query(
+      `SELECT p.gender, up.interested_in AS "interestedIn"
+       FROM profiles p
+       LEFT JOIN user_preferences up ON up.user_id = p.user_id
+       WHERE p.user_id = $1`,
+      [userId]
+    );
+    if (userPrefRes.rows.length > 0) {
+      const { gender, interestedIn } = userPrefRes.rows[0];
+      const normGender = (gender || '').toLowerCase();
+
+      // If user has an exclusive single-gender preference (e.g. ['Women'] or ['Men'])
+      if (interestedIn && Array.isArray(interestedIn) && interestedIn.length === 1 && !interestedIn.includes('Everyone')) {
+        const pref = interestedIn[0];
+        if (pref === 'Men' || pref === 'Man') preferredGenders.push('Man', 'Men');
+        else if (pref === 'Women' || pref === 'Woman') preferredGenders.push('Woman', 'Women');
+        else preferredGenders.push(pref);
+      } else {
+        // Standard rule: Man sees Women first, Woman sees Men first
+        if (normGender.includes('man') && !normGender.includes('wo')) {
+          preferredGenders.push('Woman', 'Women');
+        } else if (normGender.includes('woman') || normGender.includes('women')) {
+          preferredGenders.push('Man', 'Men');
+        }
+      }
+    }
+  } catch (_) {}
+
   const sql = `
     SELECT
       p.id,
@@ -13,6 +44,7 @@ async function getFeedPosts(userId, limit = 20) {
       p.updated_at AS "updatedAt",
       COALESCE(p.is_edited, FALSE) AS "isEdited",
       prof.display_name AS "authorName",
+      prof.gender AS "authorGender",
       (u.email_verified_at IS NOT NULL) AS "isVerified",
       (
         SELECT url FROM profile_photos
@@ -31,17 +63,24 @@ async function getFeedPosts(userId, limit = 20) {
     FROM posts p
     JOIN profiles prof ON prof.user_id = p.user_id
     JOIN users u ON u.id = p.user_id
-    ORDER BY p.created_at DESC
+    ORDER BY
+      CASE
+        WHEN p.user_id = $1 THEN 0
+        WHEN $3::varchar[] IS NOT NULL AND array_length($3::varchar[], 1) > 0 AND prof.gender = ANY($3::varchar[]) THEN 1
+        WHEN $3::varchar[] IS NULL OR array_length($3::varchar[], 1) IS NULL THEN 1
+        ELSE 2
+      END ASC,
+      p.created_at DESC
     LIMIT $2
   `;
 
   let res;
   try {
-    res = await query(sql, [userId, limit]);
+    res = await query(sql, [userId, limit, preferredGenders]);
   } catch (err) {
     if (err.message && err.message.includes('is_edited')) {
       await query(`ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
-      res = await query(sql, [userId, limit]);
+      res = await query(sql, [userId, limit, preferredGenders]);
     } else {
       throw err;
     }
@@ -279,8 +318,14 @@ async function getPostComments(postId) {
        c.id,
        c.user_id AS "userId",
        c.comment_text AS "commentText",
+       c.parent_comment_id AS "parentCommentId",
+       c.reply_to_user_id AS "replyToUserId",
        c.created_at AS "createdAt",
        prof.display_name AS "authorName",
+       (
+         SELECT display_name FROM profiles
+         WHERE user_id = (SELECT user_id FROM post_comments WHERE id = c.parent_comment_id)
+       ) AS "replyToUserName",
        (
          SELECT url FROM profile_photos
          WHERE user_id = c.user_id
@@ -295,12 +340,20 @@ async function getPostComments(postId) {
   return res.rows;
 }
 
-async function addPostComment(userId, postId, commentText) {
+async function addPostComment(userId, postId, commentText, parentCommentId = null) {
+  let replyToUserId = null;
+  if (parentCommentId) {
+    const parentCheck = await query(`SELECT user_id FROM post_comments WHERE id = $1`, [parentCommentId]);
+    if (parentCheck.rows.length > 0) {
+      replyToUserId = parentCheck.rows[0].user_id;
+    }
+  }
+
   const res = await query(
-    `INSERT INTO post_comments (user_id, post_id, comment_text, created_at)
-     VALUES ($1, $2, $3, NOW())
-     RETURNING id, user_id AS "userId", comment_text AS "commentText", created_at AS "createdAt"`,
-    [userId, postId, commentText]
+    `INSERT INTO post_comments (user_id, post_id, comment_text, parent_comment_id, reply_to_user_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     RETURNING id, user_id AS "userId", comment_text AS "commentText", parent_comment_id AS "parentCommentId", reply_to_user_id AS "replyToUserId", created_at AS "createdAt"`,
+    [userId, postId, commentText, parentCommentId || null, replyToUserId]
   );
   const comment = res.rows[0];
   const userProf = await query(
@@ -311,13 +364,24 @@ async function addPostComment(userId, postId, commentText) {
   );
 
   const senderName = userProf.rows[0]?.authorName || 'Someone';
+  const snippet = commentText.length > 40 ? `${commentText.substring(0, 37)}...` : commentText;
 
-  // Send comment notification to post author
+  // If this is a reply to another comment, notify the parent comment author
+  if (replyToUserId && replyToUserId !== userId) {
+    notificationService.createNotification({
+      recipientId: replyToUserId,
+      senderId: userId,
+      type: 'comment',
+      entityId: postId,
+      message: `${senderName} replied to your comment: "${snippet}"`,
+    }).catch(() => {});
+  }
+
+  // Also notify post author (if not the sender and not the parent comment author already notified)
   const postRes = await query(`SELECT user_id FROM posts WHERE id = $1`, [postId]);
   if (postRes.rows.length > 0) {
     const authorId = postRes.rows[0].user_id;
-    if (authorId !== userId) {
-      const snippet = commentText.length > 40 ? `${commentText.substring(0, 37)}...` : commentText;
+    if (authorId !== userId && authorId !== replyToUserId) {
       notificationService.createNotification({
         recipientId: authorId,
         senderId: userId,
@@ -336,11 +400,37 @@ async function addPostComment(userId, postId, commentText) {
     type: 'mention',
   }).catch(() => {});
 
+  let replyToUserName = null;
+  if (replyToUserId) {
+    const targetProf = await query(`SELECT display_name FROM profiles WHERE user_id = $1`, [replyToUserId]);
+    replyToUserName = targetProf.rows[0]?.display_name || null;
+  }
+
   return {
     ...comment,
     authorName: userProf.rows[0]?.authorName || 'Me',
     authorAvatar: userProf.rows[0]?.authorAvatar || '',
+    replyToUserName,
   };
+}
+
+async function deletePostComment(userId, postId, commentId) {
+  const commentCheck = await query(
+    `SELECT c.user_id, p.user_id AS "postAuthorId"
+     FROM post_comments c
+     JOIN posts p ON p.id = c.post_id
+     WHERE c.id = $1 AND c.post_id = $2`,
+    [commentId, postId]
+  );
+  if (commentCheck.rows.length === 0) {
+    throw new NotFoundError('Comment not found');
+  }
+  const { user_id: commentAuthorId, postAuthorId } = commentCheck.rows[0];
+  if (commentAuthorId !== userId && postAuthorId !== userId) {
+    throw new UnauthorizedError('You can only delete your own comments or comments on your posts');
+  }
+  await query(`DELETE FROM post_comments WHERE id = $1`, [commentId]);
+  return true;
 }
 
 module.exports = {
@@ -352,4 +442,5 @@ module.exports = {
   togglePostLike,
   getPostComments,
   addPostComment,
+  deletePostComment,
 };

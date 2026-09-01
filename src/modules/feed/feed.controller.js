@@ -70,9 +70,19 @@ async function addComment(req, res, next) {
     const comment = await feedService.addComment(
       req.user.userId,
       req.params.postId,
-      req.body.commentText || req.body.text
+      req.body.commentText || req.body.text,
+      req.body.parentCommentId || null
     );
     return success(res, comment, 201);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteComment(req, res, next) {
+  try {
+    await feedService.deleteComment(req.user.userId, req.params.postId, req.params.commentId);
+    return success(res, { deleted: true });
   } catch (err) {
     next(err);
   }
@@ -87,4 +97,5 @@ module.exports = {
   toggleLike,
   getComments,
   addComment,
+  deleteComment,
 };

@@ -73,7 +73,47 @@ async function recordLikeAndCheckMatch(sourceUserId, targetUserId) {
   });
 }
 
+async function checkLikeAndMatchStatus(sourceUserId, targetUserId) {
+  const likeRes = await query(
+    `SELECT 1 FROM likes WHERE source_user_id = $1 AND target_user_id = $2`,
+    [sourceUserId, targetUserId]
+  );
+  const isLiked = likeRes.rows.length > 0;
+
+  const userOneId = sourceUserId < targetUserId ? sourceUserId : targetUserId;
+  const userTwoId = sourceUserId < targetUserId ? targetUserId : sourceUserId;
+
+  const matchRes = await query(
+    `SELECT m.id AS "matchId", c.id AS "conversationId"
+     FROM matches m
+     LEFT JOIN conversations c ON c.match_id = m.id
+     WHERE m.user_one_id = $1 AND m.user_two_id = $2`,
+    [userOneId, userTwoId]
+  );
+
+  const isMatch = matchRes.rows.length > 0;
+  const conversationId = isMatch ? matchRes.rows[0].conversationId : null;
+  const matchId = isMatch ? matchRes.rows[0].matchId : null;
+
+  return {
+    isLiked,
+    isMatch,
+    matchId,
+    conversationId,
+  };
+}
+
+async function unlikeUser(sourceUserId, targetUserId) {
+  await query(
+    `DELETE FROM likes WHERE source_user_id = $1 AND target_user_id = $2`,
+    [sourceUserId, targetUserId]
+  );
+  return { unliked: true };
+}
+
 module.exports = {
   insertPass,
   recordLikeAndCheckMatch,
+  checkLikeAndMatchStatus,
+  unlikeUser,
 };

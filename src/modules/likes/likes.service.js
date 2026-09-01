@@ -26,14 +26,17 @@ async function likeUser(sourceUserId, targetUserId) {
   return result;
 }
 
-async function passUser(sourceUserId, targetUserId) {
-  if (sourceUserId === targetUserId) {
-    throw new BadRequestError('You cannot pass yourself', 'SELF_PASS_NOT_ALLOWED');
-  }
-  return likesRepo.insertPass(sourceUserId, targetUserId);
+async function getStatus(sourceUserId, targetUserId) {
+  return likesRepo.checkLikeAndMatchStatus(sourceUserId, targetUserId);
+}
+
+async function unlikeUser(sourceUserId, targetUserId) {
+  return likesRepo.unlikeUser(sourceUserId, targetUserId);
 }
 
 module.exports = {
   likeUser,
   passUser,
+  getStatus,
+  unlikeUser,
 };

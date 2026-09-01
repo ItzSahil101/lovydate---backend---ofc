@@ -36,11 +36,15 @@ async function getComments(postId) {
   return feedRepo.getPostComments(postId);
 }
 
-async function addComment(userId, postId, commentText) {
+async function addComment(userId, postId, commentText, parentCommentId = null) {
   if (!commentText || commentText.trim().length === 0) {
     throw new BadRequestError('Comment cannot be empty');
   }
-  return feedRepo.addPostComment(userId, postId, commentText.trim());
+  return feedRepo.addPostComment(userId, postId, commentText.trim(), parentCommentId);
+}
+
+async function deleteComment(userId, postId, commentId) {
+  return feedRepo.deletePostComment(userId, postId, commentId);
 }
 
 module.exports = {
@@ -52,4 +56,5 @@ module.exports = {
   toggleLike,
   getComments,
   addComment,
+  deleteComment,
 };

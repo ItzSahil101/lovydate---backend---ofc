@@ -27,8 +27,18 @@ async function findCandidateUserIds(userId, prefs, limit = 100) {
 
   let genderClause = '';
   if (prefs.interestedIn && prefs.interestedIn.length > 0 && !prefs.interestedIn.includes('Everyone')) {
+    const expandedGenders = [];
+    for (const g of prefs.interestedIn) {
+      if (g === 'Men' || g === 'Man') {
+        expandedGenders.push('Man', 'Men');
+      } else if (g === 'Women' || g === 'Woman') {
+        expandedGenders.push('Woman', 'Women');
+      } else {
+        expandedGenders.push(g);
+      }
+    }
     genderClause = `AND p.gender = ANY($${idx++}::varchar[])`;
-    values.push(prefs.interestedIn);
+    values.push(expandedGenders);
   }
 
   let ageClause = '';
