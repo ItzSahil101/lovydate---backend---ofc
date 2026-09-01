@@ -1,6 +1,7 @@
+require('dotenv').config();
 const http = require('http');
-const app = require('./app');
 const env = require('./config/env');
+const app = require('./app');
 const redis = require('./infrastructure/redis/client');
 const { pool } = require('./infrastructure/database/pool');
 const { initSocketServer } = require('./infrastructure/websocket/socketServer');

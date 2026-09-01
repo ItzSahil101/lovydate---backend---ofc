@@ -15,6 +15,9 @@ lerna-debug.log*
 .env.production.local
 *.env
 !*.env.example
+*firebase*.json
+*service-account*.json
+serviceAccountKey.json
 
 # Local Uploads & Media Storage
 uploads/*
