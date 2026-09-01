@@ -5,7 +5,7 @@ function calculateCompletion(profile) {
   if (profile.displayName) score += 15;
   if (profile.dateOfBirth) score += 15;
   if (profile.gender) score += 10;
-  if (profile.city) score += 10;
+  if (profile.city || profile.countryCode) score += 10;
   if (Array.isArray(profile.photos)) {
     if (profile.photos.length >= 2) score += 20;
     else if (profile.photos.length === 1) score += 10;
@@ -16,8 +16,12 @@ function calculateCompletion(profile) {
   if (profile.bio && profile.bio.trim().length > 0) {
     score += 10;
   }
-  if (profile.heightCm || profile.smoking || profile.drinking || profile.occupation) {
+  if (profile.heightCm || profile.smoking || profile.drinking || profile.occupation || profile.pets) {
     score += 10;
+  }
+  // When main visible sections are filled, ensure it reaches 100%
+  if (score >= 80 && Array.isArray(profile.photos) && profile.photos.length >= 2 && profile.bio && Array.isArray(profile.interests) && profile.interests.length >= 3) {
+    score = 100;
   }
   return Math.min(100, Math.round(score));
 }
@@ -287,6 +291,7 @@ async function updateProfile(userId, patch) {
 
 async function searchProfiles(searchTerm, limit = 20) {
   const cleanTerm = (searchTerm || '').trim();
+  const withSpaces = cleanTerm.replace(/_/g, ' ');
   const sql = `
     SELECT
       p.user_id AS "userId",
@@ -300,20 +305,29 @@ async function searchProfiles(searchTerm, limit = 20) {
       loc.city
     FROM profiles p
     LEFT JOIN user_locations loc ON loc.user_id = p.user_id
-    WHERE ($1 = '' OR p.display_name ILIKE $2)
+    WHERE ($1 = '' 
+       OR p.display_name ILIKE $2 
+       OR p.display_name ILIKE $3 
+       OR REPLACE(p.display_name, ' ', '_') ILIKE $2)
     ORDER BY p.display_name ASC
-    LIMIT $3
+    LIMIT $4
   `;
 
-  const res = await query(sql, [cleanTerm, `%${cleanTerm}%`, limit]);
+  const res = await query(sql, [cleanTerm, `%${cleanTerm}%`, `%${withSpaces}%`, limit]);
   return res.rows;
 }
 
 async function getProfileByName(displayName) {
   const cleanName = (displayName || '').trim();
+  const withSpaces = cleanName.replace(/_/g, ' ');
+  const withUnderscores = cleanName.replace(/\s+/g, '_');
   const check = await query(
-    `SELECT user_id FROM profiles WHERE LOWER(display_name) = LOWER($1) LIMIT 1`,
-    [cleanName]
+    `SELECT user_id FROM profiles 
+     WHERE LOWER(display_name) = LOWER($1) 
+        OR LOWER(display_name) = LOWER($2)
+        OR LOWER(REPLACE(display_name, ' ', '_')) = LOWER($3)
+     LIMIT 1`,
+    [cleanName, withSpaces, withUnderscores]
   );
   if (check.rows.length === 0) {
     return null;

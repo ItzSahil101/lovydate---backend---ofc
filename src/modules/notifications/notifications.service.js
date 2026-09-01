@@ -29,16 +29,18 @@ async function notifyMentions({ senderId, text, entityId, type = 'mention' }) {
   const mentionMatches = text.match(/@([a-zA-Z0-9_\.\-]+)/g);
   if (!mentionMatches || mentionMatches.length === 0) return [];
 
-  const names = [...new Set(mentionMatches.map((m) => m.substring(1).trim()).filter(Boolean))];
-  if (names.length === 0) return [];
+  const rawNames = mentionMatches.map((m) => m.substring(1).trim()).filter(Boolean);
+  const namesWithSpaces = rawNames.map((n) => n.replace(/_/g, ' '));
+  const lowerNames = [...new Set([...rawNames, ...namesWithSpaces])].map((n) => n.toLowerCase());
+  if (lowerNames.length === 0) return [];
 
   // Find user IDs for matching display names (case-insensitive)
   const sql = `
     SELECT p.user_id AS "userId", p.display_name AS "displayName"
     FROM profiles p
     WHERE LOWER(p.display_name) = ANY($1::text[])
+       OR LOWER(REPLACE(p.display_name, ' ', '_')) = ANY($1::text[])
   `;
-  const lowerNames = names.map((n) => n.toLowerCase());
   const res = await query(sql, [lowerNames]);
 
   const senderProf = await query(
