@@ -20,7 +20,7 @@ async function getConversationsForUser(userId) {
       EXTRACT(YEAR FROM AGE(p.date_of_birth))::int AS "partnerAge",
       ul.city AS "partnerCity",
       p.last_active_at AS "partnerLastActiveAt",
-      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '20 minutes') AS "partnerIsOnline",
+      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '3 minutes') AS "partnerIsOnline",
       (
         SELECT url FROM profile_photos
         WHERE user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END
@@ -80,7 +80,7 @@ async function getConversationDetails(conversationId, userId) {
       ul.city AS "partnerCity",
       p.bio AS "partnerBio",
       p.last_active_at AS "partnerLastActiveAt",
-      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '20 minutes') AS "partnerIsOnline",
+      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '3 minutes') AS "partnerIsOnline",
       (
         SELECT url FROM profile_photos
         WHERE user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END

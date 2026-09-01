@@ -119,7 +119,7 @@ async function getMatchesSummary(userId) {
       ul.country_code AS "countryCode",
       (u.email_verified_at IS NOT NULL) AS "isVerified",
       p.last_active_at AS "lastActiveAt",
-      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '30 minutes') AS "isOnline",
+      (p.last_active_at IS NOT NULL AND p.last_active_at > NOW() - INTERVAL '3 minutes') AS "isOnline",
       c.id AS "conversationId",
       (
         SELECT url FROM profile_photos

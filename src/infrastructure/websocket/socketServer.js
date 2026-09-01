@@ -2,9 +2,16 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
 const redis = require('../redis/client');
+const { query } = require('../database/pool');
 const { CACHE_KEYS, CACHE_TTL } = require('../../config/constants');
 
 let ioInstance = null;
+const activeUserSockets = new Map();
+
+function isUserOnline(userId) {
+  if (!userId) return false;
+  return activeUserSockets.has(userId);
+}
 
 function initSocketServer(httpServer) {
   const io = new Server(httpServer, {
@@ -35,6 +42,11 @@ function initSocketServer(httpServer) {
     const userId = socket.userId;
     socket.join(`user:${userId}`);
 
+    const count = (activeUserSockets.get(userId) || 0) + 1;
+    activeUserSockets.set(userId, count);
+
+    // Update database presence and Redis cache
+    query('UPDATE profiles SET last_active_at = NOW() WHERE user_id = $1', [userId]).catch(() => {});
     try {
       await redis.set(CACHE_KEYS.PRESENCE(userId), 'online', 'EX', CACHE_TTL.PRESENCE_SECONDS);
     } catch {}
@@ -70,6 +82,14 @@ function initSocketServer(httpServer) {
     });
 
     socket.on('disconnect', async () => {
+      const current = (activeUserSockets.get(userId) || 1) - 1;
+      if (current <= 0) {
+        activeUserSockets.delete(userId);
+      } else {
+        activeUserSockets.set(userId, current);
+      }
+
+      query('UPDATE profiles SET last_active_at = NOW() WHERE user_id = $1', [userId]).catch(() => {});
       try {
         await redis.del(CACHE_KEYS.PRESENCE(userId));
       } catch {}
@@ -101,4 +121,6 @@ module.exports = {
   getIO,
   emitToUser,
   emitToConversation,
+  isUserOnline,
 };
+
