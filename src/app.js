@@ -20,6 +20,7 @@ const reportsRoutes = require('./modules/reports/reports.routes');
 const bootstrapRoutes = require('./modules/bootstrap/bootstrap.routes');
 const mediaRoutes = require('./modules/media/media.routes');
 const feedRoutes = require('./modules/feed/feed.routes');
+const notificationsRoutes = require('./modules/notifications/notifications.routes');
 
 const app = express();
 
@@ -76,6 +77,7 @@ app.use('/api/v1/conversations', chatRoutes);
 app.use('/api/v1/bootstrap', bootstrapRoutes);
 app.use('/api/v1/media', mediaRoutes);
 app.use('/api/v1/feed', feedRoutes);
+app.use('/api/v1/notifications', notificationsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

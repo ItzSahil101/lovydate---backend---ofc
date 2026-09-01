@@ -26,11 +26,59 @@ async function saveStep(userId, step, stepName, stepData) {
   };
 }
 
+async function reverseGeocodeCoords(latitude, longitude) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
+      {
+        headers: { 'User-Agent': 'LovyDateBackend/1.0 (support@lovydate.fun)' },
+        signal: AbortSignal.timeout(3000),
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const addr = data && data.address;
+      if (addr) {
+        const city =
+          addr.city ||
+          addr.town ||
+          addr.municipality ||
+          addr.village ||
+          addr.county ||
+          addr.suburb ||
+          addr.state_district ||
+          addr.state;
+        const countryCode = (addr.country_code || 'US').toUpperCase();
+        return { city: city ? String(city).trim() : null, countryCode };
+      }
+    }
+  } catch (_) {}
+  return { city: null, countryCode: 'US' };
+}
+
 async function saveLocation(userId, { latitude, longitude, city, countryCode }) {
   if (latitude == null || longitude == null) {
     throw new BadRequestError('Latitude and longitude are required', 'COORDINATES_REQUIRED');
   }
-  return onboardingRepo.updateUserLocation(userId, { latitude, longitude, city, countryCode });
+
+  let finalCity = city;
+  let finalCountryCode = countryCode;
+  if (!finalCity) {
+    const geo = await reverseGeocodeCoords(latitude, longitude);
+    if (geo.city) {
+      finalCity = geo.city;
+    }
+    if (!finalCountryCode) {
+      finalCountryCode = geo.countryCode;
+    }
+  }
+
+  return onboardingRepo.updateUserLocation(userId, {
+    latitude,
+    longitude,
+    city: finalCity,
+    countryCode: finalCountryCode || 'US',
+  });
 }
 
 async function complete(userId) {

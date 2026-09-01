@@ -11,6 +11,16 @@ router.use(requireAuth);
 router.get('/me', profileController.getMe);
 router.patch('/me', validate(profilePatchSchema), profileController.updateMe);
 router.get(
+  '/search',
+  rateLimiter({ action: 'profiles-search', max: 120, windowSeconds: 60 }),
+  profileController.searchProfiles
+);
+router.get(
+  '/by-name/:name',
+  rateLimiter({ action: 'profile-view-by-name', max: 120, windowSeconds: 60 }),
+  profileController.getProfileByName
+);
+router.get(
   '/',
   rateLimiter({ action: 'profiles-batch', max: 60, windowSeconds: 60 }),
   profileController.getBatch

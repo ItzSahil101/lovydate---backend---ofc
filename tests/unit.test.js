@@ -156,5 +156,21 @@ describe('Shared Utilities & Validation Tests', () => {
       sendSpy.mockRestore();
     });
   });
+
+  describe('Mentions & Notifications Utilities', () => {
+    it('should accurately extract mentions from post text', () => {
+      const text = 'Hey @JaneDoe and @alex_99, check out this beautiful view with @Sameer!';
+      const mentionMatches = text.match(/@([a-zA-Z0-9_\.\-]+)/g);
+      expect(mentionMatches).toEqual(['@JaneDoe', '@alex_99', '@Sameer']);
+      const names = mentionMatches.map((m) => m.substring(1));
+      expect(names).toEqual(['JaneDoe', 'alex_99', 'Sameer']);
+    });
+
+    it('should return null when no mentions exist', () => {
+      const text = 'Just a regular post without mentions #sunset #vibes';
+      const mentionMatches = text.match(/@([a-zA-Z0-9_\.\-]+)/g);
+      expect(mentionMatches).toBeNull();
+    });
+  });
 });
 

@@ -20,6 +20,15 @@ async function createPost(req, res, next) {
   }
 }
 
+async function updatePost(req, res, next) {
+  try {
+    const post = await feedService.updatePost(req.user.userId, req.params.postId, req.body);
+    return success(res, post);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function deletePost(req, res, next) {
   try {
     const result = await feedService.deletePost(req.user.userId, req.params.postId);
@@ -72,6 +81,7 @@ async function addComment(req, res, next) {
 module.exports = {
   getFeed,
   createPost,
+  updatePost,
   deletePost,
   reportPost,
   toggleLike,

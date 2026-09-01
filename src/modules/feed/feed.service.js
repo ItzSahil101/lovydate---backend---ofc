@@ -13,6 +13,13 @@ async function createPost(userId, data) {
   return feedRepo.createPost(userId, data);
 }
 
+async function updatePost(userId, postId, data) {
+  if (!data.content && (!data.photos || data.photos.length === 0)) {
+    throw new BadRequestError('Post must have content or photos');
+  }
+  return feedRepo.updatePost(userId, postId, data);
+}
+
 async function deletePost(userId, postId) {
   return feedRepo.deletePost(userId, postId);
 }
@@ -39,6 +46,7 @@ async function addComment(userId, postId, commentText) {
 module.exports = {
   getFeed,
   createPost,
+  updatePost,
   deletePost,
   reportPost,
   toggleLike,

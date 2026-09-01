@@ -19,6 +19,26 @@ async function getProfileById(req, res, next) {
   }
 }
 
+async function getProfileByName(req, res, next) {
+  try {
+    const profile = await profileService.getProfileByName(req.params.name);
+    return success(res, profile);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function searchProfiles(req, res, next) {
+  try {
+    const query = req.query.q || '';
+    const limit = parseInt(req.query.limit || '20', 10);
+    const profiles = await profileService.searchProfiles(query, limit);
+    return success(res, profiles);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getBatch(req, res, next) {
   try {
     const rawIds = req.query.ids || '';
@@ -42,6 +62,8 @@ async function updateMe(req, res, next) {
 module.exports = {
   getMe,
   getProfileById,
+  getProfileByName,
+  searchProfiles,
   getBatch,
   updateMe,
 };

@@ -67,9 +67,33 @@ async function updateMyProfile(userId, patch) {
   return updated;
 }
 
+async function searchProfiles(searchTerm, limit = 20) {
+  return profileRepo.searchProfiles(searchTerm, limit);
+}
+
+async function getProfileByName(displayName) {
+  const profile = await profileRepo.getProfileByName(displayName);
+  if (!profile) {
+    throw new NotFoundError('Profile not found', 'PROFILE_NOT_FOUND');
+  }
+  return {
+    id: profile.userId,
+    displayName: profile.displayName,
+    age: profile.age,
+    gender: profile.gender,
+    relationshipGoal: profile.relationshipGoal,
+    bio: profile.bio || '',
+    city: profile.city || null,
+    photos: profile.photos || [],
+    interests: profile.interests || [],
+  };
+}
+
 module.exports = {
   getPublicProfile,
   getMyProfile,
   getProfilesBatch,
   updateMyProfile,
+  searchProfiles,
+  getProfileByName,
 };

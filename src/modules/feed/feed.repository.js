@@ -1,5 +1,6 @@
 const { query, withTransaction } = require('../../infrastructure/database/pool');
 const { UnauthorizedError, NotFoundError } = require('../../shared/errors');
+const notificationService = require('../notifications/notifications.service');
 
 async function getFeedPosts(userId, limit = 20) {
   const sql = `
@@ -9,6 +10,8 @@ async function getFeedPosts(userId, limit = 20) {
       p.content,
       p.location_name AS "locationName",
       p.created_at AS "createdAt",
+      p.updated_at AS "updatedAt",
+      COALESCE(p.is_edited, FALSE) AS "isEdited",
       prof.display_name AS "authorName",
       (u.email_verified_at IS NOT NULL) AS "isVerified",
       (
@@ -59,22 +62,22 @@ async function getFeedPosts(userId, limit = 20) {
 }
 
 async function createPost(userId, { content, locationName = null, photos = [] }) {
-  return withTransaction(async (client) => {
+  const post = await withTransaction(async (client) => {
     const postRes = await client.query(
-      `INSERT INTO posts (user_id, content, location_name, created_at, updated_at)
-       VALUES ($1, $2, $3, NOW(), NOW())
-       RETURNING id, user_id AS "userId", content, location_name AS "locationName", created_at AS "createdAt"`,
+      `INSERT INTO posts (user_id, content, location_name, is_edited, created_at, updated_at)
+       VALUES ($1, $2, $3, FALSE, NOW(), NOW())
+       RETURNING id, user_id AS "userId", content, location_name AS "locationName", is_edited AS "isEdited", created_at AS "createdAt"`,
       [userId, content, locationName]
     );
 
-    const post = postRes.rows[0];
+    const inserted = postRes.rows[0];
 
     if (Array.isArray(photos) && photos.length > 0) {
       for (let i = 0; i < photos.length; i++) {
         await client.query(
           `INSERT INTO post_photos (post_id, url, display_order, created_at)
            VALUES ($1, $2, $3, NOW())`,
-          [post.id, photos[i], i]
+          [inserted.id, photos[i], i]
         );
       }
     }
@@ -89,7 +92,7 @@ async function createPost(userId, { content, locationName = null, photos = [] })
     );
 
     return {
-      ...post,
+      ...inserted,
       authorName: userProf.rows[0]?.authorName || 'Me',
       authorAvatar: userPhoto.rows[0]?.url || '',
       isVerified: true,
@@ -99,6 +102,95 @@ async function createPost(userId, { content, locationName = null, photos = [] })
       isLiked: false,
     };
   });
+
+  // Notify any mentioned users asynchronously
+  if (content) {
+    notificationService.notifyMentions({
+      senderId: userId,
+      text: content,
+      entityId: post.id,
+      type: 'mention',
+    }).catch(() => {});
+  }
+
+  return post;
+}
+
+async function updatePost(userId, postId, { content, locationName = null, photos = null }) {
+  const check = await query(`SELECT user_id, content FROM posts WHERE id = $1`, [postId]);
+  if (check.rows.length === 0) {
+    throw new NotFoundError('Post not found');
+  }
+  if (check.rows[0].user_id !== userId) {
+    throw new UnauthorizedError('You can only edit your own posts');
+  }
+
+  const updated = await withTransaction(async (client) => {
+    const postRes = await client.query(
+      `UPDATE posts
+       SET content = $1, location_name = $2, is_edited = TRUE, updated_at = NOW()
+       WHERE id = $3
+       RETURNING id, user_id AS "userId", content, location_name AS "locationName", is_edited AS "isEdited", created_at AS "createdAt", updated_at AS "updatedAt"`,
+      [content, locationName, postId]
+    );
+
+    const row = postRes.rows[0];
+
+    if (Array.isArray(photos)) {
+      await client.query(`DELETE FROM post_photos WHERE post_id = $1`, [postId]);
+      for (let i = 0; i < photos.length; i++) {
+        await client.query(
+          `INSERT INTO post_photos (post_id, url, display_order, created_at)
+           VALUES ($1, $2, $3, NOW())`,
+          [postId, photos[i], i]
+        );
+      }
+    }
+
+    const currentPhotos = await client.query(
+      `SELECT url FROM post_photos WHERE post_id = $1 ORDER BY display_order ASC`,
+      [postId]
+    );
+
+    const userProf = await client.query(
+      `SELECT display_name AS "authorName" FROM profiles WHERE user_id = $1`,
+      [userId]
+    );
+    const userPhoto = await client.query(
+      `SELECT url FROM profile_photos WHERE user_id = $1 ORDER BY display_order ASC LIMIT 1`,
+      [userId]
+    );
+    const counts = await client.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM post_likes WHERE post_id = $1) AS "likesCount",
+         (SELECT COUNT(*)::int FROM post_comments WHERE post_id = $1) AS "commentsCount",
+         EXISTS (SELECT 1 FROM post_likes WHERE post_id = $1 AND user_id = $2) AS "isLiked"`,
+      [postId, userId]
+    );
+
+    return {
+      ...row,
+      authorName: userProf.rows[0]?.authorName || 'Me',
+      authorAvatar: userPhoto.rows[0]?.url || '',
+      isVerified: true,
+      photos: currentPhotos.rows.map((p) => p.url),
+      likesCount: counts.rows[0]?.likesCount || 0,
+      commentsCount: counts.rows[0]?.commentsCount || 0,
+      isLiked: counts.rows[0]?.isLiked || false,
+    };
+  });
+
+  // Notify any newly mentioned users
+  if (content) {
+    notificationService.notifyMentions({
+      senderId: userId,
+      text: content,
+      entityId: postId,
+      type: 'mention',
+    }).catch(() => {});
+  }
+
+  return updated;
 }
 
 async function deletePost(userId, postId) {
@@ -145,6 +237,28 @@ async function togglePostLike(userId, postId) {
       `INSERT INTO post_likes (user_id, post_id, created_at) VALUES ($1, $2, NOW())`,
       [userId, postId]
     );
+
+    // Send notification to post author
+    const postRes = await query(`SELECT user_id FROM posts WHERE id = $1`, [postId]);
+    if (postRes.rows.length > 0) {
+      const authorId = postRes.rows[0].user_id;
+      if (authorId !== userId) {
+        const senderProf = await query(
+          `SELECT display_name AS "senderName" FROM profiles WHERE user_id = $1`,
+          [userId]
+        );
+        const senderName = senderProf.rows[0]?.senderName || 'Someone';
+
+        notificationService.createNotification({
+          recipientId: authorId,
+          senderId: userId,
+          type: 'like',
+          entityId: postId,
+          message: `${senderName} liked your post`,
+        }).catch(() => {});
+      }
+    }
+
     return { liked: true };
   }
 }
@@ -185,6 +299,33 @@ async function addPostComment(userId, postId, commentText) {
      FROM profiles prof WHERE prof.user_id = $1`,
     [userId]
   );
+
+  const senderName = userProf.rows[0]?.authorName || 'Someone';
+
+  // Send comment notification to post author
+  const postRes = await query(`SELECT user_id FROM posts WHERE id = $1`, [postId]);
+  if (postRes.rows.length > 0) {
+    const authorId = postRes.rows[0].user_id;
+    if (authorId !== userId) {
+      const snippet = commentText.length > 40 ? `${commentText.substring(0, 37)}...` : commentText;
+      notificationService.createNotification({
+        recipientId: authorId,
+        senderId: userId,
+        type: 'comment',
+        entityId: postId,
+        message: `${senderName} commented: "${snippet}"`,
+      }).catch(() => {});
+    }
+  }
+
+  // Also notify mentions in comment
+  notificationService.notifyMentions({
+    senderId: userId,
+    text: commentText,
+    entityId: postId,
+    type: 'mention',
+  }).catch(() => {});
+
   return {
     ...comment,
     authorName: userProf.rows[0]?.authorName || 'Me',
@@ -195,6 +336,7 @@ async function addPostComment(userId, postId, commentText) {
 module.exports = {
   getFeedPosts,
   createPost,
+  updatePost,
   deletePost,
   reportPost,
   togglePostLike,

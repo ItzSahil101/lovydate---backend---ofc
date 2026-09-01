@@ -7,6 +7,8 @@ router.use(requireAuth);
 
 router.get('/', feedController.getFeed);
 router.post('/', feedController.createPost);
+router.put('/:postId', feedController.updatePost);
+router.patch('/:postId', feedController.updatePost);
 router.delete('/:postId', feedController.deletePost);
 router.post('/:postId/report', feedController.reportPost);
 router.post('/:postId/like', feedController.toggleLike);

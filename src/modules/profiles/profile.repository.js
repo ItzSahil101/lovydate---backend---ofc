@@ -285,8 +285,46 @@ async function updateProfile(userId, patch) {
   return getProfileByUserId(userId);
 }
 
+async function searchProfiles(searchTerm, limit = 20) {
+  const cleanTerm = (searchTerm || '').trim();
+  const sql = `
+    SELECT
+      p.user_id AS "userId",
+      p.display_name AS "displayName",
+      EXTRACT(YEAR FROM age(NOW(), p.date_of_birth))::int AS age,
+      (
+        SELECT url FROM profile_photos
+        WHERE user_id = p.user_id
+        ORDER BY display_order ASC LIMIT 1
+      ) AS "avatarUrl",
+      loc.city
+    FROM profiles p
+    LEFT JOIN user_locations loc ON loc.user_id = p.user_id
+    WHERE ($1 = '' OR p.display_name ILIKE $2)
+    ORDER BY p.display_name ASC
+    LIMIT $3
+  `;
+
+  const res = await query(sql, [cleanTerm, `%${cleanTerm}%`, limit]);
+  return res.rows;
+}
+
+async function getProfileByName(displayName) {
+  const cleanName = (displayName || '').trim();
+  const check = await query(
+    `SELECT user_id FROM profiles WHERE LOWER(display_name) = LOWER($1) LIMIT 1`,
+    [cleanName]
+  );
+  if (check.rows.length === 0) {
+    return null;
+  }
+  return getProfileByUserId(check.rows[0].user_id);
+}
+
 module.exports = {
   getProfileByUserId,
   getProfilesBatch,
   updateProfile,
+  searchProfiles,
+  getProfileByName,
 };
