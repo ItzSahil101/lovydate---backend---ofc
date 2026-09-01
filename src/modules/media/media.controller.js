@@ -1,6 +1,45 @@
-const { uploadFileToS3 } = require('./media.service');
+const path = require('path');
+const fs = require('fs');
+const { uploadFileToS3, getFileFromS3 } = require('./media.service');
 const { success } = require('../../shared/response');
 const { BadRequestError } = require('../../shared/errors');
+
+async function getMediaFile(req, res, next) {
+  try {
+    const { key } = req.params;
+    if (!key || key.includes('..') || key.includes('/') || key.includes('\\')) {
+      return res.status(400).json({ error: { code: 'INVALID_KEY', message: 'Invalid media key' } });
+    }
+
+    try {
+      const { stream, contentType, contentLength, eTag, lastModified } = await getFileFromS3(key);
+
+      if (eTag) res.setHeader('ETag', eTag);
+      if (lastModified) res.setHeader('Last-Modified', new Date(lastModified).toUTCString());
+
+      if (req.headers['if-none-match'] && req.headers['if-none-match'] === eTag) {
+        return res.status(304).end();
+      }
+
+      res.setHeader('Content-Type', contentType || 'image/jpeg');
+      if (contentLength) res.setHeader('Content-Length', contentLength);
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+
+      return stream.pipe(res);
+    } catch (s3Err) {
+      const localPath = path.join(__dirname, '../../../../uploads', key);
+      if (fs.existsSync(localPath)) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.sendFile(localPath);
+      }
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Media not found' } });
+    }
+  } catch (err) {
+    next(err);
+  }
+}
 
 async function uploadSingle(req, res, next) {
   try {
@@ -45,6 +84,7 @@ async function uploadMultiple(req, res, next) {
 }
 
 module.exports = {
+  getMediaFile,
   uploadSingle,
   uploadMultiple,
 };

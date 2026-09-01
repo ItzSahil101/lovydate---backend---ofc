@@ -132,9 +132,9 @@ describe('Shared Utilities & Validation Tests', () => {
     const { getPublicUrl, uploadFileToS3 } = require('../src/modules/media/media.service');
     const { s3Client } = require('../src/infrastructure/s3/client');
 
-    it('should generate correct public URL pointing to MinIO S3 bucket', () => {
+    it('should generate correct public URL pointing to server media endpoint', () => {
       const url = getPublicUrl('sample-image-id.jpg');
-      expect(url).toBe('https://minio.lovydate.fun/images/sample-image-id.jpg');
+      expect(url).toBe('https://server.lovydate.fun/api/v1/media/sample-image-id.jpg');
     });
 
     it('should upload buffer to S3 client and return formatted object', async () => {
@@ -148,7 +148,7 @@ describe('Shared Utilities & Validation Tests', () => {
 
       const result = await uploadFileToS3(fakeFile);
       expect(sendSpy).toHaveBeenCalledTimes(1);
-      expect(result.url).toMatch(/^https:\/\/minio\.lovydate\.fun\/images\/[a-f0-9-]+\.png$/);
+      expect(result.url).toMatch(/^https:\/\/server\.lovydate\.fun\/api\/v1\/media\/[a-f0-9-]+\.png$/);
       expect(result.key).toMatch(/^[a-f0-9-]+\.png$/);
       expect(result.mimetype).toBe('image/png');
       expect(result.size).toBe(16);

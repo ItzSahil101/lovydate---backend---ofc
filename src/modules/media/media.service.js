@@ -1,13 +1,31 @@
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const { PutObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { s3Client } = require('../../infrastructure/s3/client');
 const env = require('../../config/env');
 
 function getPublicUrl(key) {
-  const endpoint = env.s3.endpoint.replace(/\/+$/, '');
-  const bucket = env.s3.bucket;
-  return `${endpoint}/${bucket}/${key}`;
+  if (env.media && env.media.publicUrl) {
+    const base = env.media.publicUrl.replace(/\/+$/, '');
+    return `${base}/${key}`;
+  }
+  return `https://server.lovydate.fun/api/v1/media/${key}`;
+}
+
+async function getFileFromS3(key) {
+  const command = new GetObjectCommand({
+    Bucket: env.s3.bucket,
+    Key: key,
+  });
+
+  const response = await s3Client.send(command);
+  return {
+    stream: response.Body,
+    contentType: response.ContentType,
+    contentLength: response.ContentLength,
+    eTag: response.ETag,
+    lastModified: response.LastModified,
+  };
 }
 
 async function uploadFileToS3(file) {
@@ -33,5 +51,6 @@ async function uploadFileToS3(file) {
 
 module.exports = {
   uploadFileToS3,
+  getFileFromS3,
   getPublicUrl,
 };

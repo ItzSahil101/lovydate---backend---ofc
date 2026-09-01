@@ -28,4 +28,7 @@ module.exports = {
     secretKey: process.env.S3_SECRET_KEY || '',
     region: process.env.S3_REGION || 'us-east-1',
   },
+  media: {
+    publicUrl: process.env.PUBLIC_MEDIA_URL || `${process.env.PUBLIC_URL || 'https://server.lovydate.fun'}/api/v1/media`,
+  },
 };

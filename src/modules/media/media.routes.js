@@ -25,6 +25,9 @@ const upload = multer({
   },
 });
 
+router.get('/file/:key', mediaController.getMediaFile);
+router.get('/:key', mediaController.getMediaFile);
+
 router.post(
   '/upload',
   rateLimiter({ action: 'media-upload', max: 30, windowSeconds: 60 }),
