@@ -7,7 +7,20 @@ async function insertBlock(blockerId, blockedId) {
      ON CONFLICT (blocker_user_id, blocked_user_id) DO NOTHING`,
     [blockerId, blockedId]
   );
+  // Also remove from matches so conversations are cleanly closed
+  await query(
+    `DELETE FROM matches WHERE (user_one_id = $1 AND user_two_id = $2) OR (user_one_id = $2 AND user_two_id = $1)`,
+    [blockerId, blockedId]
+  );
   return { blocked: true };
+}
+
+async function deleteBlock(blockerId, blockedId) {
+  await query(
+    `DELETE FROM blocks WHERE blocker_user_id = $1 AND blocked_user_id = $2`,
+    [blockerId, blockedId]
+  );
+  return { unblocked: true };
 }
 
 async function getBlockedUsers(userId) {

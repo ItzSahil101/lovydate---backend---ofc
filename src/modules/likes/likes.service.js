@@ -2,6 +2,7 @@ const likesRepo = require('./likes.repository');
 const redis = require('../../infrastructure/redis/client');
 const { CACHE_KEYS } = require('../../config/constants');
 const { emitToUser } = require('../../infrastructure/websocket/socketServer');
+const { sendPushToUser } = require('../../infrastructure/firebase/fcm');
 const { BadRequestError } = require('../../shared/errors');
 
 async function likeUser(sourceUserId, targetUserId) {
@@ -27,6 +28,15 @@ async function likeUser(sourceUserId, targetUserId) {
       conversationId: result.match.conversationId,
       partnerUserId: sourceUserId,
     });
+
+    sendPushToUser(targetUserId, {
+      title: "It's a Match! 🎉",
+      body: 'You have a new mutual match on LövyDate! Tap to start chatting.',
+      data: {
+        type: 'match',
+        conversationId: result.match.conversationId,
+      },
+    }).catch(() => {});
   }
 
   return result;

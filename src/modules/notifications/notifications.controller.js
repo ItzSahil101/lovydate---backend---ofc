@@ -38,9 +38,33 @@ async function markAllAsRead(req, res, next) {
   }
 }
 
+const { saveDeviceToken, removeDeviceToken: deleteToken } = require('../../infrastructure/firebase/fcm');
+
+async function registerDeviceToken(req, res, next) {
+  try {
+    const { deviceToken, platform } = req.body;
+    await saveDeviceToken(req.user.userId, deviceToken, platform);
+    return success(res, { registered: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function removeDeviceToken(req, res, next) {
+  try {
+    const { deviceToken } = req.body;
+    await deleteToken(req.user.userId, deviceToken);
+    return success(res, { removed: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getNotifications,
   getUnreadCount,
   markAsRead,
   markAllAsRead,
+  registerDeviceToken,
+  removeDeviceToken,
 };
