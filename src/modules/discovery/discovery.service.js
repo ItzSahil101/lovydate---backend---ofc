@@ -42,42 +42,8 @@ async function generateCandidatePool(userId, filterOverrides = null) {
 }
 
 async function getCandidatesFromPoolOrGenerate(userId, count = 20, filterOverrides = null) {
-  if (filterOverrides && Object.keys(filterOverrides).length > 0) {
-    const generated = await generateCandidatePool(userId, filterOverrides);
-    return generated.slice(0, count);
-  }
-
-  const cacheKey = CACHE_KEYS.DISCOVERY_CANDIDATES(userId);
-  let candidateIds = [];
-
-  try {
-    const remaining = await redis.llen(cacheKey);
-    if (remaining <= DISCOVERY.LOW_WATER_MARK) {
-      addJob(QUEUE_NAMES.DISCOVERY_REFILL, 'refill', { userId }).catch(() => {});
-    }
-
-    if (remaining > 0) {
-      const popped = await redis.lrange(cacheKey, 0, count - 1);
-      if (popped && popped.length > 0) {
-        await redis.ltrim(cacheKey, popped.length, -1);
-        candidateIds = popped;
-      }
-    }
-  } catch {}
-
-  if (candidateIds.length === 0) {
-    const generated = await generateCandidatePool(userId);
-    candidateIds = generated.slice(0, count);
-    try {
-      if (generated.length > count) {
-        await redis.ltrim(cacheKey, count, -1);
-      } else {
-        await redis.del(cacheKey);
-      }
-    } catch {}
-  }
-
-  return candidateIds;
+  const candidateIds = await generateCandidatePool(userId, filterOverrides);
+  return candidateIds.slice(0, count);
 }
 
 async function getDiscoveryFeed(userId, limit = DISCOVERY.DEFAULT_PAGE_SIZE, cursor = null, filterOverrides = null) {
@@ -85,9 +51,10 @@ async function getDiscoveryFeed(userId, limit = DISCOVERY.DEFAULT_PAGE_SIZE, cur
   const decoded = decodeCursor(cursor);
   const offset = decoded ? decoded.offset || 0 : 0;
 
-  const candidateIds = await getCandidatesFromPoolOrGenerate(userId, clampedLimit, filterOverrides);
+  const candidateIds = await generateCandidatePool(userId, filterOverrides);
+  const pagedIds = candidateIds.slice(offset, offset + clampedLimit);
 
-  if (candidateIds.length === 0) {
+  if (pagedIds.length === 0) {
     return {
       items: [],
       nextCursor: null,
@@ -95,7 +62,7 @@ async function getDiscoveryFeed(userId, limit = DISCOVERY.DEFAULT_PAGE_SIZE, cur
     };
   }
 
-  const profiles = await profileRepo.getProfilesBatch(candidateIds, userId);
+  const profiles = await profileRepo.getProfilesBatch(pagedIds, userId);
 
   const profileMap = {};
   profiles.forEach((p) => {
