@@ -29,6 +29,7 @@ async function getConversationsForUser(userId) {
       ) AS "partnerPhotoUrl",
       lm.id AS "lastMessageId",
       lm.content AS "lastMessageContent",
+      lm.message_type AS "lastMessageType",
       lm.sender_id AS "lastMessageSenderId",
       lm.created_at AS "lastMessageCreatedAt",
       (
@@ -48,13 +49,18 @@ async function getConversationsForUser(userId) {
     LEFT JOIN user_locations ul ON ul.user_id = p.user_id
     LEFT JOIN conversation_members partner_cm ON partner_cm.conversation_id = c.id AND partner_cm.user_id != $1
     LEFT JOIN LATERAL (
-      SELECT id, content, sender_id, created_at
+      SELECT id, content, message_type, sender_id, created_at
       FROM messages
       WHERE conversation_id = c.id
       ORDER BY created_at DESC, id DESC
       LIMIT 1
     ) lm ON TRUE
     WHERE cm.user_id = $1
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END)
+           OR (b.blocked_user_id = $1 AND b.blocker_user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END)
+      )
     ORDER BY c.updated_at DESC
   `;
 
@@ -113,18 +119,23 @@ async function getMessages(conversationId, limit = 50, cursor = null) {
       conversation_id AS "conversationId",
       sender_id AS "senderId",
       content,
+      message_type AS type,
+      media_url AS "mediaUrl",
+      media_mime_type AS "mimeType",
+      media_size_bytes AS "sizeBytes",
+      media_duration_seconds AS "durationSeconds",
       created_at AS "createdAt"
     FROM messages
     WHERE conversation_id = $1
       ${cursorClause}
-    ORDER BY created_at ASC, id ASC
+    ORDER BY created_at DESC, id DESC
     LIMIT $${limitIdx}
   `;
 
   const res = await query(sql, values);
   const rows = res.rows;
   const hasMore = rows.length > limit;
-  const items = hasMore ? rows.slice(0, limit) : rows;
+  const items = (hasMore ? rows.slice(0, limit) : rows).reverse();
 
   return {
     items,
@@ -132,13 +143,35 @@ async function getMessages(conversationId, limit = 50, cursor = null) {
   };
 }
 
-async function insertMessage(conversationId, senderId, content) {
+async function insertMessage(conversationId, senderId, messageData) {
   return withTransaction(async (client) => {
     const msgRes = await client.query(
-      `INSERT INTO messages (conversation_id, sender_id, content)
-       VALUES ($1, $2, $3)
-       RETURNING id, conversation_id AS "conversationId", sender_id AS "senderId", content, created_at AS "createdAt"`,
-      [conversationId, senderId, content]
+      `INSERT INTO messages (
+         conversation_id, sender_id, content, message_type, media_url,
+         media_mime_type, media_size_bytes, media_duration_seconds
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING
+         id,
+         conversation_id AS "conversationId",
+         sender_id AS "senderId",
+         content,
+         message_type AS type,
+         media_url AS "mediaUrl",
+         media_mime_type AS "mimeType",
+         media_size_bytes AS "sizeBytes",
+         media_duration_seconds AS "durationSeconds",
+         created_at AS "createdAt"`,
+      [
+        conversationId,
+        senderId,
+        messageData.content,
+        messageData.type,
+        messageData.mediaUrl,
+        messageData.mimeType,
+        messageData.sizeBytes,
+        messageData.durationSeconds,
+      ]
     );
     const message = msgRes.rows[0];
 

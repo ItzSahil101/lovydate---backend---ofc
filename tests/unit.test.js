@@ -129,7 +129,13 @@ describe('Shared Utilities & Validation Tests', () => {
   });
 
   describe('Media S3 Service', () => {
-    const { getPublicUrl, uploadFileToS3 } = require('../src/modules/media/media.service');
+    const {
+      getPublicUrl,
+      getMediaKind,
+      isManagedMediaUrl,
+      readMp4DurationSeconds,
+      uploadFileToS3,
+    } = require('../src/modules/media/media.service');
     const { s3Client } = require('../src/infrastructure/s3/client');
 
     it('should generate correct public URL pointing to server media endpoint', () => {
@@ -155,6 +161,117 @@ describe('Shared Utilities & Validation Tests', () => {
 
       sendSpy.mockRestore();
     });
+
+    it('should classify chat media and read MP4 movie-header duration', () => {
+      expect(getMediaKind('image/webp')).toBe('image');
+      expect(getMediaKind('audio/mp4')).toBe('audio');
+      expect(getMediaKind('video/quicktime')).toBe('video');
+      expect(isManagedMediaUrl('https://server.lovydate.fun/api/v1/media/example.mp4')).toBe(true);
+      expect(isManagedMediaUrl('https://example.com/untrusted.mp4')).toBe(false);
+
+      const fakeMovie = Buffer.alloc(40);
+      fakeMovie.write('mvhd', 4, 'ascii');
+      fakeMovie.writeUInt8(0, 8);
+      fakeMovie.writeUInt32BE(1000, 20);
+      fakeMovie.writeUInt32BE(90000, 24);
+      expect(readMp4DurationSeconds(fakeMovie)).toBe(90);
+    });
+  });
+
+  describe('Relationship Controllers', () => {
+    const likesController = require('../src/modules/likes/likes.controller');
+    const likesService = require('../src/modules/likes/likes.service');
+    const blocksController = require('../src/modules/blocks/blocks.controller');
+    const blocksService = require('../src/modules/blocks/blocks.service');
+
+    function responseDouble() {
+      return {
+        statusCode: 0,
+        body: null,
+        status(code) {
+          this.statusCode = code;
+          return this;
+        },
+        json(body) {
+          this.body = body;
+          return this;
+        },
+      };
+    }
+
+    it('should invoke the like service and return a successful response', async () => {
+      const spy = jest.spyOn(likesService, 'likeUser').mockResolvedValue({ liked: true, isMatch: false });
+      const res = responseDouble();
+      await likesController.likeUser(
+        { user: { userId: 'source' }, params: {}, body: { targetUserId: 'target' } },
+        res,
+        (error) => { throw error; }
+      );
+      expect(spy).toHaveBeenCalledWith('source', 'target');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.liked).toBe(true);
+      spy.mockRestore();
+    });
+
+    it('should invoke the block service and return a successful response', async () => {
+      const spy = jest.spyOn(blocksService, 'blockUser').mockResolvedValue({ blocked: true });
+      const res = responseDouble();
+      await blocksController.blockUser(
+        { user: { userId: 'source' }, params: {}, body: { targetUserId: 'target' } },
+        res,
+        (error) => { throw error; }
+      );
+      expect(spy).toHaveBeenCalledWith('source', 'target');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.blocked).toBe(true);
+      spy.mockRestore();
+    });
+
+    it('should expose the mobile-client relationship route aliases', async () => {
+      const request = require('supertest');
+      const jwt = require('jsonwebtoken');
+      const env = require('../src/config/env');
+      const redis = require('../src/infrastructure/redis/client');
+      const reportsService = require('../src/modules/reports/reports.service');
+      const app = require('../src/app');
+      const userId = '11111111-1111-4111-8111-111111111111';
+      const targetUserId = '22222222-2222-4222-8222-222222222222';
+      const token = jwt.sign({ userId, email: 'route-test@lovydate.com' }, env.jwt.secret);
+
+      const incrSpy = jest.spyOn(redis, 'incr').mockResolvedValue(1);
+      const expireSpy = jest.spyOn(redis, 'expire').mockResolvedValue(1);
+      const ttlSpy = jest.spyOn(redis, 'ttl').mockResolvedValue(60);
+      const likeSpy = jest.spyOn(likesService, 'likeUser').mockResolvedValue({ liked: true, isMatch: false });
+      const blockSpy = jest.spyOn(blocksService, 'blockUser').mockResolvedValue({ blocked: true });
+      const reportSpy = jest.spyOn(reportsService, 'reportUser').mockResolvedValue({ reported: true, reportId: 'report-id' });
+
+      await request(app)
+        .post('/api/v1/likes')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ targetUserId })
+        .expect(200);
+      await request(app)
+        .post('/api/v1/blocks')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ targetUserId })
+        .expect(200);
+      await request(app)
+        .post('/api/v1/reports')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ targetUserId, reason: 'Spam' })
+        .expect(201);
+
+      for (const spy of [
+        incrSpy,
+        expireSpy,
+        ttlSpy,
+        likeSpy,
+        blockSpy,
+        reportSpy,
+      ]) {
+        spy.mockRestore();
+      }
+    });
   });
 
   describe('Mentions & Notifications Utilities', () => {
@@ -173,4 +290,3 @@ describe('Shared Utilities & Validation Tests', () => {
     });
   });
 });
-

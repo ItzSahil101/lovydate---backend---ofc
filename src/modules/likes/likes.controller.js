@@ -1,3 +1,6 @@
+const likesService = require('./likes.service');
+const { success } = require('../../shared/response');
+
 async function likeUser(req, res, next) {
   try {
     const targetUserId = req.params.targetUserId || req.body.targetUserId;

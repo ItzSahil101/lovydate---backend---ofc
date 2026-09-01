@@ -7,6 +7,12 @@ const { rateLimiter } = require('../../middleware/rateLimiter');
 router.use(requireAuth);
 
 router.post(
+  '/',
+  rateLimiter({ action: 'report', max: 30, windowSeconds: 60 }),
+  reportsController.reportUser
+);
+
+router.post(
   '/:targetUserId/report',
   rateLimiter({ action: 'report', max: 30, windowSeconds: 60 }),
   reportsController.reportUser

@@ -1,5 +1,5 @@
 const { query, withTransaction } = require('../../infrastructure/database/pool');
-const { UnauthorizedError, NotFoundError } = require('../../shared/errors');
+const { UnauthorizedError, ForbiddenError, NotFoundError } = require('../../shared/errors');
 const notificationService = require('../notifications/notifications.service');
 
 async function getFeedPosts(userId, limit = 20) {
@@ -277,7 +277,26 @@ async function reportPost(userId, postId, reason = 'Inappropriate content') {
   return { reported: true };
 }
 
+async function assertCanInteractWithPost(userId, postId) {
+  const res = await query(
+    `SELECT p.user_id AS "authorId"
+     FROM posts p
+     WHERE p.id = $2
+       AND NOT EXISTS (
+         SELECT 1 FROM blocks b
+         WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = p.user_id)
+            OR (b.blocked_user_id = $1 AND b.blocker_user_id = p.user_id)
+       )`,
+    [userId, postId]
+  );
+  if (res.rows.length === 0) {
+    throw new ForbiddenError('You cannot interact with this post', 'USER_INTERACTION_BLOCKED');
+  }
+  return res.rows[0].authorId;
+}
+
 async function togglePostLike(userId, postId) {
+  const authorId = await assertCanInteractWithPost(userId, postId);
   const existing = await query(
     `SELECT 1 FROM post_likes WHERE user_id = $1 AND post_id = $2`,
     [userId, postId]
@@ -293,10 +312,7 @@ async function togglePostLike(userId, postId) {
     );
 
     // Send notification to post author
-    const postRes = await query(`SELECT user_id FROM posts WHERE id = $1`, [postId]);
-    if (postRes.rows.length > 0) {
-      const authorId = postRes.rows[0].user_id;
-      if (authorId !== userId) {
+    if (authorId !== userId) {
         const senderProf = await query(
           `SELECT display_name AS "senderName" FROM profiles WHERE user_id = $1`,
           [userId]
@@ -310,14 +326,14 @@ async function togglePostLike(userId, postId) {
           entityId: postId,
           message: `${senderName} liked your post`,
         }).catch(() => {});
-      }
     }
 
     return { liked: true };
   }
 }
 
-async function getPostComments(postId) {
+async function getPostComments(postId, userId) {
+  await assertCanInteractWithPost(userId, postId);
   const res = await query(
     `SELECT
        c.id,
@@ -339,13 +355,19 @@ async function getPostComments(postId) {
      FROM post_comments c
      JOIN profiles prof ON prof.user_id = c.user_id
      WHERE c.post_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM blocks b
+         WHERE (b.blocker_user_id = $2 AND b.blocked_user_id = c.user_id)
+            OR (b.blocked_user_id = $2 AND b.blocker_user_id = c.user_id)
+       )
      ORDER BY c.created_at ASC`,
-    [postId]
+    [postId, userId]
   );
   return res.rows;
 }
 
 async function addPostComment(userId, postId, commentText, parentCommentId = null) {
+  await assertCanInteractWithPost(userId, postId);
   let replyToUserId = null;
   if (parentCommentId) {
     const parentCheck = await query(`SELECT user_id FROM post_comments WHERE id = $1`, [parentCommentId]);

@@ -32,8 +32,8 @@ async function toggleLike(userId, postId) {
   return feedRepo.togglePostLike(userId, postId);
 }
 
-async function getComments(postId) {
-  return feedRepo.getPostComments(postId);
+async function getComments(postId, userId) {
+  return feedRepo.getPostComments(postId, userId);
 }
 
 async function addComment(userId, postId, commentText, parentCommentId = null) {

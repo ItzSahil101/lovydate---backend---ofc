@@ -39,6 +39,7 @@ async function runMigrations({ closePool = false } = {}) {
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Migration error:', err.message);
+    throw err;
   } finally {
     client.release();
     if (closePool) {

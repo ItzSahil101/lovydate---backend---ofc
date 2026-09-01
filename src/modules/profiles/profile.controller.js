@@ -12,7 +12,7 @@ async function getMe(req, res, next) {
 
 async function getProfileById(req, res, next) {
   try {
-    const profile = await profileService.getPublicProfile(req.params.userId);
+    const profile = await profileService.getPublicProfile(req.params.userId, req.user.userId);
     return success(res, profile);
   } catch (err) {
     next(err);
@@ -21,7 +21,7 @@ async function getProfileById(req, res, next) {
 
 async function getProfileByName(req, res, next) {
   try {
-    const profile = await profileService.getProfileByName(req.params.name);
+    const profile = await profileService.getProfileByName(req.params.name, req.user.userId);
     return success(res, profile);
   } catch (err) {
     next(err);
@@ -32,7 +32,7 @@ async function searchProfiles(req, res, next) {
   try {
     const query = req.query.q || '';
     const limit = parseInt(req.query.limit || '20', 10);
-    const profiles = await profileService.searchProfiles(query, limit);
+    const profiles = await profileService.searchProfiles(query, limit, req.user.userId);
     return success(res, profiles);
   } catch (err) {
     next(err);
@@ -43,7 +43,7 @@ async function getBatch(req, res, next) {
   try {
     const rawIds = req.query.ids || '';
     const ids = rawIds.split(',').map((id) => id.trim()).filter(Boolean);
-    const profiles = await profileService.getProfilesBatch(ids);
+    const profiles = await profileService.getProfilesBatch(ids, req.user.userId);
     return success(res, { profiles });
   } catch (err) {
     next(err);

@@ -1,3 +1,6 @@
+const blocksService = require('./blocks.service');
+const { success } = require('../../shared/response');
+
 async function blockUser(req, res, next) {
   try {
     const targetUserId = req.params.targetUserId || req.body.targetUserId;

@@ -2,12 +2,21 @@ const chatRepo = require('./chat.repository');
 const { emitToConversation } = require('../../infrastructure/websocket/socketServer');
 const { encodeCursor, decodeCursor } = require('../../shared/cursor');
 const { ForbiddenError, NotFoundError, BadRequestError } = require('../../shared/errors');
+const { isUuid } = require('../../shared/ids');
+const { isManagedMediaUrl } = require('../media/media.service');
+
+function validateConversationId(conversationId) {
+  if (!isUuid(conversationId)) {
+    throw new BadRequestError('A valid conversation is required', 'INVALID_CONVERSATION_ID');
+  }
+}
 
 async function listConversations(userId) {
   return chatRepo.getConversationsForUser(userId);
 }
 
 async function getConversation(conversationId, userId) {
+  validateConversationId(conversationId);
   const isMember = await chatRepo.isConversationMember(conversationId, userId);
   if (!isMember) {
     throw new ForbiddenError('You are not a member of this conversation');
@@ -20,6 +29,7 @@ async function getConversation(conversationId, userId) {
 }
 
 async function listMessages(conversationId, userId, limit = 50, cursor = null) {
+  validateConversationId(conversationId);
   const isMember = await chatRepo.isConversationMember(conversationId, userId);
   if (!isMember) {
     throw new ForbiddenError('You are not a member of this conversation');
@@ -36,7 +46,7 @@ async function listMessages(conversationId, userId, limit = 50, cursor = null) {
 
   let nextCursor = null;
   if (hasMore && items.length > 0) {
-    const lastItem = items[items.length - 1];
+    const lastItem = items[0];
     nextCursor = encodeCursor({
       createdAt: lastItem.createdAt,
       id: lastItem.id,
@@ -50,9 +60,33 @@ async function listMessages(conversationId, userId, limit = 50, cursor = null) {
   };
 }
 
-async function sendMessage(conversationId, senderId, content) {
-  if (!content || !content.trim()) {
-    throw new BadRequestError('Message content cannot be empty');
+async function sendMessage(conversationId, senderId, payload = {}) {
+  validateConversationId(conversationId);
+  const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+  const type = payload.type || 'text';
+  const allowedTypes = new Set(['text', 'image', 'audio', 'video']);
+  if (!allowedTypes.has(type)) {
+    throw new BadRequestError('Unsupported message type', 'INVALID_MESSAGE_TYPE');
+  }
+  if (type === 'text' && !content) {
+    throw new BadRequestError('Message content cannot be empty', 'EMPTY_MESSAGE');
+  }
+  if (type !== 'text' && (!payload.mediaUrl || typeof payload.mediaUrl !== 'string')) {
+    throw new BadRequestError('An uploaded media URL is required', 'MEDIA_REQUIRED');
+  }
+  if (type !== 'text' && !isManagedMediaUrl(payload.mediaUrl)) {
+    throw new BadRequestError('Chat media must be uploaded through LovyDate', 'INVALID_MEDIA_URL');
+  }
+  if (type !== 'text' &&
+      (!payload.mimeType || !payload.mimeType.startsWith(`${type}/`))) {
+    throw new BadRequestError('The media type does not match the message', 'INVALID_MEDIA_TYPE');
+  }
+  const durationSeconds = Number(payload.durationSeconds || 0);
+  if (type === 'video' && (!Number.isFinite(durationSeconds) || durationSeconds <= 0)) {
+    throw new BadRequestError('A valid video duration is required', 'INVALID_VIDEO');
+  }
+  if (type === 'video' && durationSeconds > 90) {
+    throw new BadRequestError('Videos must be 1 minute 30 seconds or shorter', 'VIDEO_TOO_LONG');
   }
 
   const isMember = await chatRepo.isConversationMember(conversationId, senderId);
@@ -63,7 +97,14 @@ async function sendMessage(conversationId, senderId, content) {
   const message = await chatRepo.insertMessage(
     conversationId,
     senderId,
-    content.trim()
+    {
+      content,
+      type,
+      mediaUrl: type === 'text' ? null : payload.mediaUrl,
+      mimeType: type === 'text' ? null : payload.mimeType,
+      sizeBytes: type === 'text' ? null : Number(payload.sizeBytes || 0) || null,
+      durationSeconds: type === 'text' ? null : durationSeconds || null,
+    }
   );
 
   emitToConversation(conversationId, 'message:new', {
@@ -71,6 +112,11 @@ async function sendMessage(conversationId, senderId, content) {
     conversationId: message.conversationId,
     senderId: message.senderId,
     content: message.content,
+    type: message.type,
+    mediaUrl: message.mediaUrl,
+    mimeType: message.mimeType,
+    sizeBytes: message.sizeBytes,
+    durationSeconds: message.durationSeconds,
     createdAt: message.createdAt,
   });
 
@@ -78,6 +124,10 @@ async function sendMessage(conversationId, senderId, content) {
 }
 
 async function markRead(conversationId, userId, lastMessageId) {
+  validateConversationId(conversationId);
+  if (!isUuid(lastMessageId)) {
+    throw new BadRequestError('A valid message is required', 'INVALID_MESSAGE_ID');
+  }
   const isMember = await chatRepo.isConversationMember(conversationId, userId);
   if (!isMember) {
     throw new ForbiddenError('You are not a member of this conversation');

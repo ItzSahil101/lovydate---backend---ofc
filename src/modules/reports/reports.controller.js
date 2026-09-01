@@ -6,7 +6,7 @@ async function reportUser(req, res, next) {
     const { reason, details } = req.body;
     const result = await reportsService.reportUser(
       req.user.userId,
-      req.params.targetUserId,
+      req.params.targetUserId || req.body.targetUserId,
       reason,
       details
     );

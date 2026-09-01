@@ -1,6 +1,11 @@
 const path = require('path');
 const fs = require('fs');
-const { uploadFileToS3, getFileFromS3 } = require('./media.service');
+const {
+  uploadFileToS3,
+  getFileFromS3,
+  getMediaKind,
+  readMp4DurationSeconds,
+} = require('./media.service');
 const { success } = require('../../shared/response');
 const { BadRequestError } = require('../../shared/errors');
 
@@ -83,8 +88,48 @@ async function uploadMultiple(req, res, next) {
   }
 }
 
+async function uploadChatMedia(req, res, next) {
+  try {
+    if (!req.file) {
+      throw new BadRequestError('No chat media file provided', 'FILE_REQUIRED');
+    }
+
+    const kind = getMediaKind(req.file.mimetype);
+    let durationSeconds = Number(req.body.durationSeconds || 0);
+
+    if (kind === 'video') {
+      durationSeconds = readMp4DurationSeconds(req.file.buffer);
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+        throw new BadRequestError(
+          'Could not read the video duration. Please choose another MP4 or MOV file.',
+          'INVALID_VIDEO'
+        );
+      }
+      if (durationSeconds > 90) {
+        throw new BadRequestError(
+          'Videos must be 1 minute 30 seconds or shorter',
+          'VIDEO_TOO_LONG'
+        );
+      }
+    }
+
+    const uploaded = await uploadFileToS3(req.file);
+    return success(res, {
+      url: uploaded.url,
+      filename: uploaded.key,
+      size: uploaded.size,
+      mimetype: uploaded.mimetype,
+      kind,
+      durationSeconds: durationSeconds > 0 ? Math.ceil(durationSeconds) : null,
+    }, 201);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getMediaFile,
   uploadSingle,
   uploadMultiple,
+  uploadChatMedia,
 };

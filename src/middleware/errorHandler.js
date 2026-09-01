@@ -1,6 +1,19 @@
 const { AppError } = require('../shared/errors');
+const multer = require('multer');
 
 function errorHandler(err, req, res, next) {
+  if (err instanceof multer.MulterError) {
+    const isTooLarge = err.code === 'LIMIT_FILE_SIZE';
+    return res.status(isTooLarge ? 413 : 400).json({
+      error: {
+        code: isTooLarge ? 'FILE_TOO_LARGE' : 'INVALID_UPLOAD',
+        message: isTooLarge
+          ? 'The uploaded file exceeds the allowed size'
+          : err.message,
+      },
+    });
+  }
+
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       error: {

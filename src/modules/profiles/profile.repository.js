@@ -132,6 +132,17 @@ async function getProfileByUserId(userId) {
   return profile;
 }
 
+async function areUsersBlocked(firstUserId, secondUserId) {
+  const res = await query(
+    `SELECT 1 FROM blocks
+     WHERE (blocker_user_id = $1 AND blocked_user_id = $2)
+        OR (blocker_user_id = $2 AND blocked_user_id = $1)
+     LIMIT 1`,
+    [firstUserId, secondUserId]
+  );
+  return res.rows.length > 0;
+}
+
 async function getProfilesBatch(userIds, viewerUserId = null) {
   if (!userIds || userIds.length === 0) return [];
 
@@ -163,7 +174,12 @@ async function getProfilesBatch(userIds, viewerUserId = null) {
      JOIN users u ON u.id = p.user_id
      LEFT JOIN user_locations ul ON ul.user_id = p.user_id
      LEFT JOIN user_locations viewer ON viewer.user_id = $2
-     WHERE p.user_id = ANY($1::uuid[]) AND p.onboarding_completed = TRUE`,
+     WHERE p.user_id = ANY($1::uuid[]) AND p.onboarding_completed = TRUE
+       AND NOT EXISTS (
+         SELECT 1 FROM blocks b
+         WHERE (b.blocker_user_id = $2 AND b.blocked_user_id = p.user_id)
+            OR (b.blocked_user_id = $2 AND b.blocker_user_id = p.user_id)
+       )`,
     [userIds, viewerUserId]
   );
 
@@ -289,7 +305,7 @@ async function updateProfile(userId, patch) {
   return getProfileByUserId(userId);
 }
 
-async function searchProfiles(searchTerm, limit = 20) {
+async function searchProfiles(searchTerm, limit = 20, viewerUserId = null) {
   const cleanTerm = (searchTerm || '').trim();
   const withSpaces = cleanTerm.replace(/_/g, ' ');
   const sql = `
@@ -309,25 +325,35 @@ async function searchProfiles(searchTerm, limit = 20) {
        OR p.display_name ILIKE $2 
        OR p.display_name ILIKE $3 
        OR REPLACE(p.display_name, ' ', '_') ILIKE $2)
+      AND ($5::uuid IS NULL OR NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_user_id = $5 AND b.blocked_user_id = p.user_id)
+           OR (b.blocked_user_id = $5 AND b.blocker_user_id = p.user_id)
+      ))
     ORDER BY p.display_name ASC
     LIMIT $4
   `;
 
-  const res = await query(sql, [cleanTerm, `%${cleanTerm}%`, `%${withSpaces}%`, limit]);
+  const res = await query(sql, [cleanTerm, `%${cleanTerm}%`, `%${withSpaces}%`, limit, viewerUserId]);
   return res.rows;
 }
 
-async function getProfileByName(displayName) {
+async function getProfileByName(displayName, viewerUserId = null) {
   const cleanName = (displayName || '').trim();
   const withSpaces = cleanName.replace(/_/g, ' ');
   const withUnderscores = cleanName.replace(/\s+/g, '_');
   const check = await query(
     `SELECT user_id FROM profiles 
-     WHERE LOWER(display_name) = LOWER($1) 
+     WHERE (LOWER(display_name) = LOWER($1)
         OR LOWER(display_name) = LOWER($2)
-        OR LOWER(REPLACE(display_name, ' ', '_')) = LOWER($3)
+        OR LOWER(REPLACE(display_name, ' ', '_')) = LOWER($3))
+       AND ($4::uuid IS NULL OR NOT EXISTS (
+         SELECT 1 FROM blocks b
+         WHERE (b.blocker_user_id = $4 AND b.blocked_user_id = profiles.user_id)
+            OR (b.blocked_user_id = $4 AND b.blocker_user_id = profiles.user_id)
+       ))
      LIMIT 1`,
-    [cleanName, withSpaces, withUnderscores]
+    [cleanName, withSpaces, withUnderscores, viewerUserId]
   );
   if (check.rows.length === 0) {
     return null;
@@ -341,4 +367,5 @@ module.exports = {
   updateProfile,
   searchProfiles,
   getProfileByName,
+  areUsersBlocked,
 };

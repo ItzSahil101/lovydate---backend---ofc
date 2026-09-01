@@ -11,6 +11,15 @@ async function createNotification({
   // Avoid self-notifications
   if (recipientId === senderId) return null;
 
+  const blocked = await query(
+    `SELECT 1 FROM blocks
+     WHERE (blocker_user_id = $1 AND blocked_user_id = $2)
+        OR (blocker_user_id = $2 AND blocked_user_id = $1)
+     LIMIT 1`,
+    [recipientId, senderId]
+  );
+  if (blocked.rows.length > 0) return null;
+
   const sql = `
     INSERT INTO notifications (recipient_id, sender_id, type, entity_id, message, metadata, created_at)
     VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -42,6 +51,11 @@ async function getNotifications(userId, limit = 40) {
     FROM notifications n
     JOIN profiles prof ON prof.user_id = n.sender_id
     WHERE n.recipient_id = $1
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = n.sender_id)
+           OR (b.blocked_user_id = $1 AND b.blocker_user_id = n.sender_id)
+      )
     ORDER BY n.created_at DESC
     LIMIT $2
   `;
@@ -55,6 +69,11 @@ async function getUnreadCount(userId) {
     SELECT COUNT(*)::int AS count
     FROM notifications
     WHERE recipient_id = $1 AND is_read = FALSE
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = notifications.sender_id)
+           OR (b.blocked_user_id = $1 AND b.blocker_user_id = notifications.sender_id)
+      )
   `;
 
   const res = await query(sql, [userId]);

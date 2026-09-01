@@ -42,7 +42,7 @@ async function sendMessage(req, res, next) {
     const message = await chatService.sendMessage(
       req.params.id,
       req.user.userId,
-      req.body.content
+      req.body
     );
     return success(res, message, 201);
   } catch (err) {

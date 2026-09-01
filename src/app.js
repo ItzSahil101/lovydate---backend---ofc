@@ -68,6 +68,11 @@ app.use('/api/v1/onboarding', onboardingRoutes);
 app.use('/api/v1/interests', interestsRoutes);
 app.use('/api/v1/profiles', profileRoutes);
 app.use('/api/v1/discovery', discoveryRoutes);
+// Keep the resource-specific paths used by the mobile client. The /users
+// mounts below remain as backwards-compatible aliases for older clients.
+app.use('/api/v1/likes', likesRoutes);
+app.use('/api/v1/blocks', blocksRoutes);
+app.use('/api/v1/reports', reportsRoutes);
 app.use('/api/v1/users', likesRoutes);
 app.use('/api/v1/users', blocksRoutes);
 app.use('/api/v1/users', reportsRoutes);

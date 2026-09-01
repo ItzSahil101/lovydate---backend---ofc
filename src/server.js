@@ -25,7 +25,9 @@ async function startServer() {
   try {
     await runMigrations();
   } catch (e) {
-    console.error('Migration initialization warning:', e.message);
+    console.error('Server startup aborted because migrations failed:', e.message);
+    process.exitCode = 1;
+    return;
   }
 
   server.listen(env.port, () => {

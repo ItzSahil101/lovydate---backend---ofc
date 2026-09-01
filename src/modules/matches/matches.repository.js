@@ -32,6 +32,11 @@ async function getMatchesForUser(userId, limit = 20, cursor = null) {
     JOIN profiles p ON p.user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END
     LEFT JOIN conversations c ON c.match_id = m.id
     WHERE (m.user_one_id = $1 OR m.user_two_id = $1)
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END)
+           OR (b.blocked_user_id = $1 AND b.blocker_user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END)
+      )
       ${cursorClause}
     ORDER BY m.created_at DESC, m.id DESC
     LIMIT $${limitIdx}
@@ -61,6 +66,11 @@ async function getMatchById(matchId, userId) {
     JOIN profiles p ON p.user_id = CASE WHEN m.user_one_id = $2 THEN m.user_two_id ELSE m.user_one_id END
     LEFT JOIN conversations c ON c.match_id = m.id
     WHERE m.id = $1 AND (m.user_one_id = $2 OR m.user_two_id = $2)
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_user_id = $2 AND b.blocked_user_id = CASE WHEN m.user_one_id = $2 THEN m.user_two_id ELSE m.user_one_id END)
+           OR (b.blocked_user_id = $2 AND b.blocker_user_id = CASE WHEN m.user_one_id = $2 THEN m.user_two_id ELSE m.user_one_id END)
+      )
   `;
   const res = await query(sql, [matchId, userId]);
   return res.rows[0] || null;
@@ -122,6 +132,11 @@ async function getMatchesSummary(userId) {
     LEFT JOIN user_locations ul ON ul.user_id = p.user_id
     LEFT JOIN conversations c ON c.match_id = m.id
     WHERE (m.user_one_id = $1 OR m.user_two_id = $1)
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END)
+           OR (b.blocked_user_id = $1 AND b.blocker_user_id = CASE WHEN m.user_one_id = $1 THEN m.user_two_id ELSE m.user_one_id END)
+      )
     ORDER BY m.created_at DESC
     LIMIT 30
   `;

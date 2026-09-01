@@ -58,7 +58,7 @@ async function toggleLike(req, res, next) {
 
 async function getComments(req, res, next) {
   try {
-    const comments = await feedService.getComments(req.params.postId);
+    const comments = await feedService.getComments(req.params.postId, req.user.userId);
     return success(res, comments);
   } catch (err) {
     next(err);
