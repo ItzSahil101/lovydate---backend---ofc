@@ -2,7 +2,7 @@ const supportService = require('./adminSupport.service');
 
 async function listCases(req, res, next) {
   try {
-    const result = await supportService.listCases(req.query);
+    const result = await supportService.listCases(req.query, req.admin);
     res.status(200).json({ data: result });
   } catch (err) {
     next(err);
@@ -41,13 +41,25 @@ async function replyToCase(req, res, next) {
   }
 }
 
+async function assignCase(req, res, next) {
+  try {
+    const { caseId } = req.params;
+    const { assignedAdminId } = req.body;
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const result = await supportService.assignCase(caseId, assignedAdminId, req.admin, ipAddress);
+    res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function addInternalNote(req, res, next) {
   try {
     const { caseId } = req.params;
     const { note } = req.body;
     const ipAddress = req.ip || req.connection.remoteAddress;
     const result = await supportService.addInternalNote(caseId, note, req.admin, ipAddress);
-    res.status(200).json({ data: result });
+    res.status(201).json({ data: result });
   } catch (err) {
     next(err);
   }
@@ -81,6 +93,7 @@ module.exports = {
   getCaseDetail,
   createCase,
   replyToCase,
+  assignCase,
   addInternalNote,
   resolveCase,
   updateCase,

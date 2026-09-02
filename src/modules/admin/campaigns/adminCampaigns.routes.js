@@ -10,6 +10,7 @@ router.get('/', requirePermission('campaigns.read'), controller.listCampaigns);
 router.post('/', requirePermission('campaigns.create'), controller.createCampaign);
 router.get('/:campaignId', requirePermission('campaigns.read'), controller.getCampaignDetail);
 router.patch('/:campaignId', requirePermission('campaigns.create'), controller.updateCampaign);
+router.delete('/:campaignId', requirePermission('campaigns.create'), controller.deleteCampaign);
 
 router.post('/:campaignId/estimate', requirePermission('campaigns.read'), controller.estimateAudience);
 router.post('/:campaignId/test', requirePermission('notifications.send'), controller.testSend);

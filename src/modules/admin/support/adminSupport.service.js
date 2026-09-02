@@ -2,8 +2,12 @@ const supportRepo = require('./adminSupport.repository');
 const { logAudit } = require('../audit/adminAudit.service');
 const { NotFoundError, BadRequestError } = require('../../../shared/errors');
 
-async function listCases(params) {
-  return supportRepo.listCases(params);
+async function listCases(params, admin) {
+  let assignedAdminId = params.assignedAdminId;
+  if (params.assignedToMe === 'true' && admin) {
+    assignedAdminId = admin.id;
+  }
+  return supportRepo.listCases({ ...params, assignedAdminId });
 }
 
 async function getCaseDetail(caseId) {
@@ -13,8 +17,8 @@ async function getCaseDetail(caseId) {
 }
 
 async function createCase(data, admin, ipAddress) {
-  if (!data.userId || !data.subject) {
-    throw new BadRequestError('User ID and subject are required');
+  if (!data.subject) {
+    throw new BadRequestError('Subject is required');
   }
 
   const newCase = await supportRepo.createCase({
@@ -38,7 +42,17 @@ async function createCase(data, admin, ipAddress) {
 async function replyToCase(caseId, message, attachments, admin, ipAddress) {
   if (!message || !message.trim()) throw new BadRequestError('Message cannot be empty');
 
-  const msg = await supportRepo.addMessage(caseId, 'admin', admin.id, message.trim(), attachments || []);
+  const senderRole = admin.roles?.[0] || 'SUPER_ADMIN';
+  const msg = await supportRepo.addMessage(
+    caseId,
+    'admin',
+    admin.id,
+    admin.displayName || 'Support Agent',
+    senderRole,
+    message.trim(),
+    attachments || []
+  );
+
   await supportRepo.updateCase(caseId, { status: 'waiting' });
 
   await logAudit({
@@ -47,10 +61,28 @@ async function replyToCase(caseId, message, attachments, admin, ipAddress) {
     action: 'SUPPORT_MESSAGE_SENT',
     targetType: 'support_case',
     targetId: caseId,
+    details: { senderRole },
     ipAddress,
   });
 
   return msg;
+}
+
+async function assignCase(caseId, assignedAdminId, admin, ipAddress) {
+  const updated = await supportRepo.updateCase(caseId, { assignedAdminId });
+  if (!updated) throw new NotFoundError('Support case not found');
+
+  await logAudit({
+    adminId: admin.id,
+    adminEmail: admin.email,
+    action: 'SUPPORT_CASE_ASSIGNED',
+    targetType: 'support_case',
+    targetId: caseId,
+    details: { assignedAdminId },
+    ipAddress,
+  });
+
+  return updated;
 }
 
 async function addInternalNote(caseId, note, admin, ipAddress) {
@@ -116,6 +148,7 @@ module.exports = {
   getCaseDetail,
   createCase,
   replyToCase,
+  assignCase,
   addInternalNote,
   resolveCase,
   updateCase,

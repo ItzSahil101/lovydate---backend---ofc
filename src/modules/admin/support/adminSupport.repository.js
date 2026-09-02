@@ -12,7 +12,9 @@ async function listCases({ status, category, assignedAdminId, limit = 25, cursor
     params.push(category);
     conditions.push(`sc.category = $${params.length}`);
   }
-  if (assignedAdminId) {
+  if (assignedAdminId === 'unassigned') {
+    conditions.push(`sc.assigned_admin_id IS NULL`);
+  } else if (assignedAdminId) {
     params.push(assignedAdminId);
     conditions.push(`sc.assigned_admin_id = $${params.length}`);
   }
@@ -27,13 +29,16 @@ async function listCases({ status, category, assignedAdminId, limit = 25, cursor
 
   const sql = `
     SELECT sc.id, sc.user_id AS "userId", sc.subject, sc.category, sc.priority, sc.status,
+           sc.assigned_admin_id AS "assignedAdminId",
+           sc.customer_name AS "customerName", sc.customer_email AS "customerEmail",
            sc.created_at AS "createdAt", sc.resolved_at AS "resolvedAt",
            sc.resolution_summary AS "resolutionSummary",
-           u.email AS "userEmail", p.display_name AS "userName",
+           COALESCE(u.email, sc.customer_email) AS "userEmail",
+           COALESCE(p.display_name, sc.customer_name, 'Visitor') AS "userName",
            (SELECT url FROM profile_photos WHERE user_id = sc.user_id AND is_primary = true LIMIT 1) AS "userPhoto",
            au.display_name AS "assignedAdminName"
     FROM support_cases sc
-    JOIN users u ON sc.user_id = u.id
+    LEFT JOIN users u ON sc.user_id = u.id
     LEFT JOIN profiles p ON sc.user_id = p.user_id
     LEFT JOIN admin_users au ON sc.assigned_admin_id = au.id
     ${whereClause}
@@ -53,15 +58,18 @@ async function getCaseDetail(caseId) {
   const caseRes = await query(
     `SELECT sc.id, sc.user_id AS "userId", sc.subject, sc.category, sc.priority, sc.status,
             sc.assigned_admin_id AS "assignedAdminId",
+            sc.customer_name AS "customerName", sc.customer_email AS "customerEmail",
             sc.created_at AS "createdAt", sc.resolved_at AS "resolvedAt",
             sc.resolution_summary AS "resolutionSummary",
-            u.email AS "userEmail", u.status AS "userStatus",
-            p.display_name AS "userName", p.gender AS "userGender",
+            COALESCE(u.email, sc.customer_email) AS "userEmail",
+            COALESCE(u.status, 'active') AS "userStatus",
+            COALESCE(p.display_name, sc.customer_name, 'Visitor') AS "userName",
+            p.gender AS "userGender",
             p.date_of_birth AS "userDob", p.bio AS "userBio",
             loc.city AS "userCity",
             au.display_name AS "assignedAdminName"
      FROM support_cases sc
-     JOIN users u ON sc.user_id = u.id
+     LEFT JOIN users u ON sc.user_id = u.id
      LEFT JOIN profiles p ON sc.user_id = p.user_id
      LEFT JOIN user_locations loc ON sc.user_id = loc.user_id
      LEFT JOIN admin_users au ON sc.assigned_admin_id = au.id
@@ -75,13 +83,12 @@ async function getCaseDetail(caseId) {
   const messagesRes = await query(
     `SELECT sm.id, sm.sender_type AS "senderType", sm.sender_id AS "senderId",
             sm.message, sm.attachments, sm.created_at AS "createdAt",
-            CASE 
-              WHEN sm.sender_type = 'admin' THEN au.display_name 
-              ELSE p.display_name 
-            END AS "senderName"
+            COALESCE(sm.sender_name, CASE WHEN sm.sender_type = 'admin' THEN au.display_name ELSE COALESCE(p.display_name, caseItem_sub.customer_name) END, 'Staff') AS "senderName",
+            COALESCE(sm.sender_role, CASE WHEN sm.sender_type = 'admin' THEN (SELECT role_id FROM admin_user_roles WHERE admin_id = sm.sender_id LIMIT 1) ELSE 'USER' END, 'SUPPORT') AS "senderRole"
      FROM support_messages sm
      LEFT JOIN admin_users au ON sm.sender_type = 'admin' AND sm.sender_id = au.id
      LEFT JOIN profiles p ON sm.sender_type = 'user' AND sm.sender_id = p.user_id
+     CROSS JOIN (SELECT customer_name FROM support_cases WHERE id = $1) caseItem_sub
      WHERE sm.case_id = $1
      ORDER BY sm.created_at ASC`,
     [caseId]
@@ -103,32 +110,32 @@ async function getCaseDetail(caseId) {
   };
 }
 
-async function createCase({ userId, subject, category, priority, message, adminId }) {
+async function createCase({ userId, customerName, customerEmail, subject, category, priority, message, adminId }) {
   const caseRes = await query(
-    `INSERT INTO support_cases (user_id, subject, category, priority, status, assigned_admin_id)
-     VALUES ($1, $2, $3, $4, 'open', $5)
+    `INSERT INTO support_cases (user_id, customer_name, customer_email, subject, category, priority, status, assigned_admin_id)
+     VALUES ($1, $2, $3, $4, $5, $6, 'open', $7)
      RETURNING id, user_id, subject, status, created_at AS "createdAt"`,
-    [userId, subject, category || 'General', priority || 'medium', adminId || null]
+    [userId || null, customerName || null, customerEmail || null, subject, category || 'General', priority || 'medium', adminId || null]
   );
   const newCase = caseRes.rows[0];
 
   if (message) {
     await query(
-      `INSERT INTO support_messages (case_id, sender_type, sender_id, message)
-       VALUES ($1, 'user', $2, $3)`,
-      [newCase.id, userId, message]
+      `INSERT INTO support_messages (case_id, sender_type, sender_id, sender_name, sender_role, message)
+       VALUES ($1, 'user', $2, $3, 'CUSTOMER', $4)`,
+      [newCase.id, userId || null, customerName || 'Customer', message]
     );
   }
 
   return newCase;
 }
 
-async function addMessage(caseId, senderType, senderId, message, attachments = []) {
+async function addMessage(caseId, senderType, senderId, senderName, senderRole, message, attachments = []) {
   const res = await query(
-    `INSERT INTO support_messages (case_id, sender_type, sender_id, message, attachments)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, sender_type AS "senderType", sender_id AS "senderId", message, created_at AS "createdAt"`,
-    [caseId, senderType, senderId, message, JSON.stringify(attachments)]
+    `INSERT INTO support_messages (case_id, sender_type, sender_id, sender_name, sender_role, message, attachments)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, sender_type AS "senderType", sender_id AS "senderId", sender_name AS "senderName", sender_role AS "senderRole", message, created_at AS "createdAt"`,
+    [caseId, senderType, senderId, senderName || null, senderRole || null, message, JSON.stringify(attachments)]
   );
 
   await query(`UPDATE support_cases SET updated_at = NOW() WHERE id = $1`, [caseId]);
@@ -158,7 +165,7 @@ async function updateCase(caseId, fields) {
     updates.push(`priority = $${params.length}`);
   }
   if (fields.assignedAdminId !== undefined) {
-    params.push(fields.assignedAdminId);
+    params.push(fields.assignedAdminId || null);
     updates.push(`assigned_admin_id = $${params.length}`);
   }
   if (fields.resolutionSummary !== undefined) {

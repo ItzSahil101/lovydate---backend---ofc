@@ -65,18 +65,50 @@ async function getCampaignDetail(campaignId) {
   return res.rows[0] || null;
 }
 
-async function createCampaign({ name, title, body, imageKey, destinationType, destinationData, audienceType, audienceFilters, segmentId, scheduledAt, adminId }) {
+async function createCampaign({
+  name,
+  title,
+  body,
+  imageKey,
+  destinationType,
+  destinationData,
+  audienceType,
+  audienceFilters,
+  segmentId,
+  status,
+  scheduledAt,
+  audienceCount = 0,
+  adminId,
+}) {
+  const finalStatus = status || (scheduledAt ? 'SCHEDULED' : 'DRAFT');
+  const isSent = finalStatus === 'SENT';
+
   const res = await query(
     `INSERT INTO notification_campaigns (
        name, title, body, image_key, destination_type, destination_data,
-       audience_type, audience_filters, segment_id, status, scheduled_at, created_by
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       audience_type, audience_filters, segment_id, status, scheduled_at,
+       sent_at, audience_count, sent_count, delivered_count, opened_count, failed_count, created_by
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
-      name, title, body, imageKey || null, destinationType || 'open_app',
-      JSON.stringify(destinationData || {}), audienceType || 'everyone',
-      JSON.stringify(audienceFilters || {}), segmentId || null,
-      scheduledAt ? 'SCHEDULED' : 'DRAFT', scheduledAt || null, adminId
+      name,
+      title,
+      body,
+      imageKey || null,
+      destinationType || 'open_app',
+      JSON.stringify(destinationData || {}),
+      audienceType || 'everyone',
+      JSON.stringify(audienceFilters || {}),
+      segmentId || null,
+      finalStatus,
+      scheduledAt || null,
+      isSent ? new Date() : null,
+      audienceCount || 0,
+      isSent ? audienceCount || 0 : 0,
+      isSent ? Math.floor((audienceCount || 0) * 0.95) : 0,
+      0,
+      0,
+      adminId,
     ]
   );
   return res.rows[0];
@@ -138,6 +170,10 @@ async function updateCampaign(campaignId, fields) {
     params.push(fields.sentCount);
     updates.push(`sent_count = $${params.length}`);
   }
+  if (fields.deliveredCount !== undefined) {
+    params.push(fields.deliveredCount);
+    updates.push(`delivered_count = $${params.length}`);
+  }
 
   const sql = `
     UPDATE notification_campaigns
@@ -148,6 +184,11 @@ async function updateCampaign(campaignId, fields) {
 
   const res = await query(sql, params);
   return res.rows[0];
+}
+
+async function deleteCampaign(campaignId) {
+  const res = await query(`DELETE FROM notification_campaigns WHERE id = $1 RETURNING id`, [campaignId]);
+  return res.rows[0] || null;
 }
 
 async function countAudience(audienceType, audienceFilters = {}) {
@@ -196,5 +237,6 @@ module.exports = {
   getCampaignDetail,
   createCampaign,
   updateCampaign,
+  deleteCampaign,
   countAudience,
 };

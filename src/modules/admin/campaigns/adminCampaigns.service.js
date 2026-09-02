@@ -28,7 +28,7 @@ async function createCampaign(data, admin, ipAddress) {
     action: 'CAMPAIGN_CREATED',
     targetType: 'campaign',
     targetId: campaign.id,
-    details: { name: data.name, title: data.title },
+    details: { name: data.name, title: data.title, status: campaign.status },
     ipAddress,
   });
 
@@ -54,6 +54,25 @@ async function updateCampaign(campaignId, data, admin, ipAddress) {
   });
 
   return updated;
+}
+
+async function deleteCampaign(campaignId, admin, ipAddress) {
+  const existing = await campaignsRepo.getCampaignDetail(campaignId);
+  if (!existing) throw new NotFoundError('Campaign not found');
+
+  const deleted = await campaignsRepo.deleteCampaign(campaignId);
+
+  await logAudit({
+    adminId: admin.id,
+    adminEmail: admin.email,
+    action: 'CAMPAIGN_DELETED',
+    targetType: 'campaign',
+    targetId: campaignId,
+    details: { name: existing.name, status: existing.status },
+    ipAddress,
+  });
+
+  return { success: true, id: campaignId };
 }
 
 async function estimateAudience(campaignId, filters) {
@@ -98,7 +117,6 @@ async function sendCampaign({ campaignId, admin, ipAddress }) {
 
   const estimatedCount = await campaignsRepo.countAudience(campaign.audienceType, campaign.audienceFilters);
 
-  // Mark as SENT (or SENDING for batch worker)
   const updated = await campaignsRepo.updateCampaign(campaignId, {
     status: 'SENT',
     sentAt: new Date(),
@@ -184,6 +202,7 @@ module.exports = {
   getCampaignDetail,
   createCampaign,
   updateCampaign,
+  deleteCampaign,
   estimateAudience,
   testSend,
   sendCampaign,

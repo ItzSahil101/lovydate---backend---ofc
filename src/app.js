@@ -83,6 +83,8 @@ app.use('/api/v1/bootstrap', bootstrapRoutes);
 app.use('/api/v1/media', mediaRoutes);
 app.use('/api/v1/feed', feedRoutes);
 app.use('/api/v1/notifications', notificationsRoutes);
+const supportRoutes = require('./modules/support/support.routes');
+app.use('/api/v1/support', supportRoutes);
 
 // LovyDate Dedicated Admin API
 const adminRoutes = require('./modules/admin/admin.routes');

@@ -40,6 +40,17 @@ async function updateCampaign(req, res, next) {
   }
 }
 
+async function deleteCampaign(req, res, next) {
+  try {
+    const { campaignId } = req.params;
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const result = await campaignsService.deleteCampaign(campaignId, req.admin, ipAddress);
+    res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function estimateAudience(req, res, next) {
   try {
     const { campaignId } = req.params;
@@ -111,6 +122,7 @@ module.exports = {
   getCampaignDetail,
   createCampaign,
   updateCampaign,
+  deleteCampaign,
   estimateAudience,
   testSend,
   sendCampaign,
