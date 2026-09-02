@@ -84,6 +84,12 @@ app.use('/api/v1/media', mediaRoutes);
 app.use('/api/v1/feed', feedRoutes);
 app.use('/api/v1/notifications', notificationsRoutes);
 
+// LovyDate Dedicated Admin API
+const adminRoutes = require('./modules/admin/admin.routes');
+const { getPublicConfig } = require('./modules/admin/config/adminConfig.controller');
+app.use('/api/v1/admin', adminRoutes);
+app.get('/api/v1/config/public', getPublicConfig);
+
 app.use((req, res) => {
   res.status(404).json({
     error: {

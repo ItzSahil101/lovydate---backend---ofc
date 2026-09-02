@@ -1,0 +1,55 @@
+const express = require('express');
+
+const authRoutes = require('./auth/adminAuth.routes');
+const dashboardRoutes = require('./dashboard/adminDashboard.routes');
+const usersRoutes = require('./users/adminUsers.routes');
+const restrictionsRoutes = require('./restrictions/adminRestrictions.routes');
+const reportsRoutes = require('./reports/adminReports.routes');
+const contentRoutes = require('./content/adminContent.routes');
+const feedRoutes = require('./feed/adminFeed.routes');
+const appealsRoutes = require('./appeals/adminAppeals.routes');
+const campaignsRoutes = require('./campaigns/adminCampaigns.routes');
+const notificationsRoutes = require('./notifications/adminNotifications.routes');
+const announcementsRoutes = require('./announcements/adminAnnouncements.routes');
+const segmentsRoutes = require('./segments/adminSegments.routes');
+const interestsRoutes = require('./interests/adminInterests.routes');
+const analyticsRoutes = require('./analytics/adminAnalytics.routes');
+const configRoutes = require('./config/adminConfig.routes');
+const featureFlagsRoutes = require('./featureFlags/adminFeatureFlags.routes');
+const systemRoutes = require('./system/adminSystem.routes');
+const jobsRoutes = require('./jobs/adminJobs.routes');
+const auditRoutes = require('./audit/adminAudit.routes');
+const adminsRoutes = require('./admins/adminAdmins.routes');
+const rolesRoutes = require('./roles/adminRoles.routes');
+const supportRoutes = require('./support/adminSupport.routes');
+const searchRoutes = require('./search/adminSearch.routes');
+const alertsRoutes = require('./alerts/adminAlerts.routes');
+
+const router = express.Router();
+
+router.use('/auth', authRoutes);
+router.use('/dashboard', dashboardRoutes);
+router.use('/users', usersRoutes);
+router.use('/restrictions', restrictionsRoutes);
+router.use('/reports', reportsRoutes);
+router.use('/content', contentRoutes);
+router.use('/feed', feedRoutes);
+router.use('/appeals', appealsRoutes);
+router.use('/campaigns', campaignsRoutes);
+router.use('/notifications', notificationsRoutes);
+router.use('/announcements', announcementsRoutes);
+router.use('/segments', segmentsRoutes);
+router.use('/interests', interestsRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/config', configRoutes);
+router.use('/feature-flags', featureFlagsRoutes);
+router.use('/system', systemRoutes);
+router.use('/jobs', jobsRoutes);
+router.use('/audit', auditRoutes);
+router.use('/admins', adminsRoutes);
+router.use('/roles', rolesRoutes);
+router.use('/support', supportRoutes);
+router.use('/search', searchRoutes);
+router.use('/alerts', alertsRoutes);
+
+module.exports = router;
