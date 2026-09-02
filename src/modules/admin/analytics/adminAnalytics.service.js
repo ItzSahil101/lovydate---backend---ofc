@@ -1,5 +1,16 @@
 const { query } = require('../../../infrastructure/database/pool');
 
+function rangeDays(range = '30D') {
+  const normalized = String(range).toUpperCase();
+  if (normalized === '7D') return 7;
+  if (normalized === '90D') return 90;
+  return 30;
+}
+
+function percentage(value, total) {
+  return total > 0 ? Number(((value / total) * 100).toFixed(1)) : 0;
+}
+
 async function getOverview(range = '30D') {
   const [usersCount, likesCount, matchesCount, msgsCount, postsCount] = await Promise.all([
     query(`SELECT COUNT(*) as count FROM users`),
@@ -22,68 +33,91 @@ async function getOverview(range = '30D') {
 }
 
 async function getGrowth(range = '30D') {
-  const usersRes = await query(`
-    SELECT DATE_TRUNC('day', created_at)::date as date,
-           COUNT(*) as "newUsers",
-           COUNT(*) FILTER (WHERE email_verified_at IS NOT NULL) as "verifiedUsers"
-    FROM users
-    WHERE created_at >= NOW() - INTERVAL '30 days'
-    GROUP BY date
-    ORDER BY date ASC
-  `);
+  const days = rangeDays(range);
+  const [metricsRes, timelineRes] = await Promise.all([
+    query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM users) AS "totalUsers",
+        (SELECT COUNT(*)::int FROM profiles WHERE last_active_at >= NOW() - INTERVAL '24 hours') AS dau,
+        (SELECT COUNT(*)::int FROM profiles WHERE last_active_at >= NOW() - INTERVAL '30 days') AS mau
+    `),
+    query(`
+      SELECT d::date AS date,
+             (SELECT COUNT(*)::int FROM profiles WHERE last_active_at::date = d::date) AS users,
+             (SELECT COUNT(*)::int FROM messages WHERE created_at::date = d::date) AS messages
+      FROM generate_series(CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day', CURRENT_DATE, INTERVAL '1 day') d
+      ORDER BY d ASC
+    `, [days]),
+  ]);
 
-  // Fill default timeline if small database
-  const timeline = usersRes.rows.length >= 5 ? usersRes.rows : Array.from({ length: 14 }).map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (13 - i));
-    return {
-      date: d.toISOString().split('T')[0],
-      newUsers: 45 + Math.floor(Math.sin(i) * 15) + (i * 3),
-      verifiedUsers: 38 + Math.floor(Math.sin(i) * 12) + (i * 2),
-    };
-  });
+  const metrics = metricsRes.rows[0] || {};
+  const dau = Number(metrics.dau || 0);
+  const mau = Number(metrics.mau || 0);
 
   return {
-    dau: 4820,
-    wau: 14210,
-    mau: 38400,
-    growthRate: '+14.8%',
-    timeline,
-    platformDistribution: [
-      { name: 'Android', value: 58, count: 22272 },
-      { name: 'iOS', value: 36, count: 13824 },
-      { name: 'Web', value: 6, count: 2304 },
-    ],
-    signupMethod: [
-      { name: 'Google OAuth', value: 64 },
-      { name: 'Email & Password', value: 36 },
-    ],
+    totalUsers: Number(metrics.totalUsers || 0),
+    dau,
+    mau,
+    stickiness: percentage(dau, mau),
+    chartData: timelineRes.rows.map((row) => ({
+      date: row.date,
+      users: Number(row.users || 0),
+      messages: Number(row.messages || 0),
+    })),
   };
 }
 
 async function getFunnel(range = '30D') {
+  const result = await query(`
+    SELECT
+      (SELECT COUNT(*)::int FROM users) AS signups,
+      (SELECT COUNT(*)::int FROM users WHERE email_verified_at IS NOT NULL) AS verified,
+      (SELECT COUNT(*)::int FROM profiles WHERE onboarding_completed = TRUE) AS onboarded,
+      (SELECT COUNT(DISTINCT source_user_id)::int FROM likes) AS liked,
+      (SELECT COUNT(DISTINCT user_id)::int FROM (
+        SELECT user_one_id AS user_id FROM matches UNION SELECT user_two_id FROM matches
+      ) matched_users) AS matched,
+      (SELECT COUNT(DISTINCT sender_id)::int FROM messages) AS messaged
+  `);
+  const row = result.rows[0] || {};
+  const total = Number(row.signups || 0);
   return [
-    { step: 'Signups', count: 10000, conversionRate: 100, dropOff: 0 },
-    { step: 'Email Verified', count: 8850, conversionRate: 88.5, dropOff: 11.5 },
-    { step: 'Onboarding Started', count: 8200, conversionRate: 82.0, dropOff: 6.5 },
-    { step: 'Onboarding Completed', count: 7150, conversionRate: 71.5, dropOff: 10.5 },
-    { step: 'Discovery Viewed', count: 6800, conversionRate: 68.0, dropOff: 3.5 },
-    { step: 'First Like Sent', count: 5400, conversionRate: 54.0, dropOff: 14.0 },
-    { step: 'First Match', count: 3200, conversionRate: 32.0, dropOff: 22.0 },
-    { step: 'First Conversation', count: 2450, conversionRate: 24.5, dropOff: 7.5 },
-  ];
+    ['Signups', Number(row.signups || 0)],
+    ['Email Verified', Number(row.verified || 0)],
+    ['Onboarding Completed', Number(row.onboarded || 0)],
+    ['Sent a Like', Number(row.liked || 0)],
+    ['Received a Match', Number(row.matched || 0)],
+    ['Sent a Chat Message', Number(row.messaged || 0)],
+  ].map(([step, count]) => ({ step, count, pct: `${percentage(count, total)}%` }));
 }
 
 async function getDiscovery(range = '30D') {
+  const days = rangeDays(range);
+  const result = await query(`
+    SELECT
+      (SELECT COUNT(*)::int FROM likes WHERE created_at >= NOW() - $1::int * INTERVAL '1 day') AS likes,
+      (SELECT COUNT(*)::int FROM passes WHERE created_at >= NOW() - $1::int * INTERVAL '1 day') AS passes,
+      (SELECT COUNT(*)::int FROM matches WHERE created_at >= NOW() - $1::int * INTERVAL '1 day') AS matches,
+      (SELECT COUNT(*)::int FROM conversations c
+         WHERE c.created_at >= NOW() - $1::int * INTERVAL '1 day'
+           AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)) AS "startedChats",
+      (SELECT COUNT(*)::int FROM messages WHERE created_at >= NOW() - $1::int * INTERVAL '1 day') AS messages
+  `, [days]);
+  const row = result.rows[0] || {};
+  const likes = Number(row.likes || 0);
+  const passes = Number(row.passes || 0);
+  const matches = Number(row.matches || 0);
+  const startedChats = Number(row.startedChats || 0);
   return {
-    totalSessions: 148200,
-    profilesViewed: 1845000,
-    likesSent: 420800,
-    passes: 1424200,
-    swipeLikeRatio: '22.8%',
-    avgCardsPerSession: 12.4,
-    cacheHitRate: '94.2%',
-    avgCandidateGenTimeMs: 42,
+    likes,
+    passes,
+    totalSwipes: likes + passes,
+    matches,
+    startedChats,
+    chatInitiationRate: percentage(startedChats, matches),
+    averageMessagesPerMatch: matches > 0
+      ? Number((Number(row.messages || 0) / matches).toFixed(1))
+      : 0,
   };
 }
 
@@ -127,16 +161,36 @@ async function getFeed(range = '30D') {
 }
 
 async function getRetention(range = '30D') {
+  const result = await query(`
+    SELECT DATE_TRUNC('week', u.created_at)::date AS "cohortStart",
+           COUNT(*)::int AS size,
+           COUNT(*) FILTER (WHERE p.last_active_at >= u.created_at + INTERVAL '1 day')::int AS d1,
+           COUNT(*) FILTER (WHERE p.last_active_at >= u.created_at + INTERVAL '7 days')::int AS d7,
+           COUNT(*) FILTER (WHERE p.last_active_at >= u.created_at + INTERVAL '14 days')::int AS d14,
+           COUNT(*) FILTER (WHERE p.last_active_at >= u.created_at + INTERVAL '30 days')::int AS d30
+    FROM users u
+    LEFT JOIN profiles p ON p.user_id = u.id
+    WHERE u.created_at >= DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '7 weeks'
+    GROUP BY DATE_TRUNC('week', u.created_at)
+    ORDER BY "cohortStart" DESC
+    LIMIT 8
+  `);
   return {
-    d1: '48.2%',
-    d7: '28.4%',
-    d30: '18.9%',
-    cohorts: [
-      { cohort: 'Aug 1 - Aug 7', users: 2400, d1: '52%', d7: '31%', d14: '26%', d30: '21%' },
-      { cohort: 'Aug 8 - Aug 14', users: 2650, d1: '50%', d7: '29%', d14: '24%', d30: '19%' },
-      { cohort: 'Aug 15 - Aug 21', users: 2800, d1: '49%', d7: '28%', d14: '23%', d30: '18%' },
-      { cohort: 'Aug 22 - Aug 28', users: 3100, d1: '51%', d7: '30%', d14: '25%', d30: '20%' },
-    ],
+    cohorts: result.rows.map((row) => {
+      const start = new Date(row.cohortStart);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      const size = Number(row.size || 0);
+      const label = `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+      return {
+        cohort: label,
+        size,
+        d1: `${percentage(Number(row.d1 || 0), size)}%`,
+        d7: `${percentage(Number(row.d7 || 0), size)}%`,
+        d14: `${percentage(Number(row.d14 || 0), size)}%`,
+        d30: `${percentage(Number(row.d30 || 0), size)}%`,
+      };
+    }),
   };
 }
 

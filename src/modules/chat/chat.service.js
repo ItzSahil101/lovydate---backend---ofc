@@ -5,6 +5,9 @@ const { encodeCursor, decodeCursor } = require('../../shared/cursor');
 const { ForbiddenError, NotFoundError, BadRequestError } = require('../../shared/errors');
 const { isUuid } = require('../../shared/ids');
 const { isManagedMediaUrl } = require('../media/media.service');
+const { assertNoRestriction } = require('../../middleware/restrictions');
+
+const MESSAGING_DISABLED = 'MESSAGING_DISABLED';
 
 function validateConversationId(conversationId) {
   if (!isUuid(conversationId)) {
@@ -63,6 +66,7 @@ async function listMessages(conversationId, userId, limit = 50, cursor = null) {
 
 async function sendMessage(conversationId, senderId, payload = {}) {
   validateConversationId(conversationId);
+  await assertNoRestriction(senderId, MESSAGING_DISABLED);
   const content = typeof payload.content === 'string' ? payload.content.trim() : '';
   const type = payload.type || 'text';
   const allowedTypes = new Set(['text', 'image', 'audio', 'video']);

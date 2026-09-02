@@ -39,7 +39,7 @@ async function requireAdminAuth(req, res, next) {
     }
 
     const admin = adminRes.rows[0];
-    if (admin.status !== 'active') {
+    if (String(admin.status || '').toLowerCase() !== 'active') {
       return next(new ForbiddenError('Admin account is disabled', 'ADMIN_DISABLED'));
     }
 

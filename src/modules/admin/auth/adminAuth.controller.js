@@ -72,6 +72,21 @@ async function deleteSession(req, res, next) {
   }
 }
 
+async function changePassword(req, res, next) {
+  try {
+    const result = await adminAuthService.changePassword({
+      adminId: req.admin.id,
+      sessionId: req.admin.sessionId,
+      currentPassword: req.body.currentPassword,
+      newPassword: req.body.newPassword,
+      ipAddress: req.ip || req.connection.remoteAddress,
+    });
+    res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   login,
   refresh,
@@ -80,4 +95,5 @@ module.exports = {
   getMe,
   getSessions,
   deleteSession,
+  changePassword,
 };

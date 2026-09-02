@@ -1,5 +1,8 @@
 const feedRepo = require('./feed.repository');
 const { BadRequestError } = require('../../shared/errors');
+const { assertNoRestriction } = require('../../middleware/restrictions');
+
+const FEED_POSTING_DISABLED = 'FEED_POSTING_DISABLED';
 
 async function getFeed(userId, limit = 20) {
   const posts = await feedRepo.getFeedPosts(userId, limit);
@@ -7,6 +10,7 @@ async function getFeed(userId, limit = 20) {
 }
 
 async function createPost(userId, data) {
+  await assertNoRestriction(userId, FEED_POSTING_DISABLED);
   if (!data.content && (!data.photos || data.photos.length === 0)) {
     throw new BadRequestError('Post must have content or photos');
   }
@@ -14,6 +18,7 @@ async function createPost(userId, data) {
 }
 
 async function updatePost(userId, postId, data) {
+  await assertNoRestriction(userId, FEED_POSTING_DISABLED);
   if (!data.content && (!data.photos || data.photos.length === 0)) {
     throw new BadRequestError('Post must have content or photos');
   }
@@ -37,6 +42,7 @@ async function getComments(postId, userId) {
 }
 
 async function addComment(userId, postId, commentText, parentCommentId = null) {
+  await assertNoRestriction(userId, FEED_POSTING_DISABLED);
   if (!commentText || commentText.trim().length === 0) {
     throw new BadRequestError('Comment cannot be empty');
   }

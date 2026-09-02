@@ -3,9 +3,16 @@ const { logAudit } = require('../audit/adminAudit.service');
 const { BadRequestError } = require('../../../shared/errors');
 
 async function getNotificationStats() {
-  const [totalRes, sentTodayRes, recentSendsRes, templatesRes] = await Promise.all([
-    query(`SELECT COUNT(*) as count FROM notification_deliveries`),
-    query(`SELECT COUNT(*) as count FROM notification_deliveries WHERE created_at >= NOW() - INTERVAL '24 hours'`),
+  const [statusTodayRes, recentSendsRes, templatesRes] = await Promise.all([
+    query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened'))::int AS "sentToday",
+        COUNT(*) FILTER (WHERE status IN ('delivered', 'opened'))::int AS "deliveredToday",
+        COUNT(*) FILTER (WHERE status = 'opened')::int AS "openedToday",
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS "failedToday"
+      FROM notification_deliveries
+      WHERE created_at >= NOW() - INTERVAL '24 hours'
+    `),
     query(
       `SELECT c.id, c.name, c.title, c.sent_at AS "sentAt", c.sent_count AS "sentCount",
               c.delivered_count AS "deliveredCount", c.opened_count AS "openedCount", c.status
@@ -17,18 +24,21 @@ async function getNotificationStats() {
     query(`SELECT id, name, title, body, destination_type AS "destinationType", created_at AS "createdAt" FROM notification_templates ORDER BY name ASC`),
   ]);
 
-  const sentToday = parseInt(sentTodayRes.rows[0]?.count || 0, 10);
-  const deliveredToday = Math.floor(sentToday * 0.96);
-  const openedToday = Math.floor(sentToday * 0.31);
-  const failedToday = Math.floor(sentToday * 0.04);
+  const statusToday = statusTodayRes.rows[0] || {};
+  const sentToday = Number(statusToday.sentToday || 0);
+  const deliveredToday = Number(statusToday.deliveredToday || 0);
+  const openedToday = Number(statusToday.openedToday || 0);
+  const failedToday = Number(statusToday.failedToday || 0);
 
   return {
     metrics: {
-      sentToday: sentToday || 12450,
-      deliveredToday: deliveredToday || 11952,
-      openedToday: openedToday || 3859,
-      failedToday: failedToday || 498,
-      openRate: '30.9%',
+      sentToday,
+      deliveredToday,
+      openedToday,
+      failedToday,
+      openRate: sentToday > 0
+        ? `${((openedToday / sentToday) * 100).toFixed(1)}%`
+        : '0.0%',
     },
     recentSends: recentSendsRes.rows,
     templates: templatesRes.rows,

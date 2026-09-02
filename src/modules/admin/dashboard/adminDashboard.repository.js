@@ -112,8 +112,36 @@ async function getRecentOperationalActivity(limit = 10) {
   return res.rows;
 }
 
+async function getLiveActivity() {
+  const result = await query(`
+    SELECT
+      (SELECT COUNT(*)::int FROM profiles WHERE last_active_at >= NOW() - INTERVAL '3 minutes') AS "onlineNow",
+      (SELECT COUNT(*)::int FROM messages WHERE created_at >= NOW() - INTERVAL '1 minute') AS "messagesPerMin",
+      (SELECT COUNT(*)::int FROM likes WHERE created_at >= NOW() - INTERVAL '1 minute') AS "likesPerMin",
+      (SELECT COUNT(*)::int FROM matches WHERE created_at >= NOW() - INTERVAL '1 minute') AS "matchesPerMin"
+  `);
+  return result.rows[0] || {};
+}
+
+async function getLatestCampaign() {
+  const result = await query(`
+    SELECT name, status, sent_count::int AS sent,
+           delivered_count::int AS delivered, opened_count::int AS opened,
+           CASE WHEN sent_count > 0
+             THEN ROUND((opened_count::numeric / sent_count::numeric) * 100, 1)::text || '%'
+             ELSE '0.0%'
+           END AS "openRate"
+    FROM notification_campaigns
+    ORDER BY COALESCE(sent_at, scheduled_at, created_at) DESC
+    LIMIT 1
+  `);
+  return result.rows[0] || null;
+}
+
 module.exports = {
   getAggregatedSummary,
   getChartSeries,
   getRecentOperationalActivity,
+  getLiveActivity,
+  getLatestCampaign,
 };

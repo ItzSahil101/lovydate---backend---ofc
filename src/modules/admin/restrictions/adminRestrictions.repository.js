@@ -1,6 +1,11 @@
 const { query } = require('../../../infrastructure/database/pool');
 
 async function listRestrictions({ type, isActive = true, limit = 50, cursor }) {
+  await query(
+    `UPDATE user_restrictions
+     SET is_active = FALSE, updated_at = NOW()
+     WHERE is_active = TRUE AND expires_at IS NOT NULL AND expires_at <= NOW()`
+  );
   const conditions = [];
   const params = [];
 

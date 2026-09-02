@@ -13,5 +13,6 @@ router.post('/logout-all', controller.logoutAll);
 router.get('/me', controller.getMe);
 router.get('/sessions', controller.getSessions);
 router.delete('/sessions/:sessionId', controller.deleteSession);
+router.post('/change-password', controller.changePassword);
 
 module.exports = router;

@@ -30,6 +30,14 @@ async function findById(adminId) {
   return res.rows[0] || null;
 }
 
+async function findByIdWithPassword(adminId) {
+  const res = await query(
+    `SELECT id, email, password_hash FROM admin_users WHERE id = $1`,
+    [adminId]
+  );
+  return res.rows[0] || null;
+}
+
 async function updateLastLogin(adminId) {
   await query(`UPDATE admin_users SET last_login_at = NOW() WHERE id = $1`, [adminId]);
 }
@@ -72,13 +80,26 @@ async function listSessions(adminId) {
   return res.rows;
 }
 
+async function updatePassword(adminId, passwordHash, currentSessionId) {
+  await query(
+    `UPDATE admin_users SET password_hash = $2, updated_at = NOW() WHERE id = $1`,
+    [adminId, passwordHash]
+  );
+  await query(
+    `DELETE FROM admin_sessions WHERE admin_id = $1 AND id != $2`,
+    [adminId, currentSessionId]
+  );
+}
+
 module.exports = {
   findByEmail,
   findById,
+  findByIdWithPassword,
   updateLastLogin,
   createSession,
   findSessionByTokenHash,
   deleteSession,
   deleteAllSessions,
   listSessions,
+  updatePassword,
 };

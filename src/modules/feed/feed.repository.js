@@ -55,7 +55,9 @@ async function getFeedPosts(userId, limit = 20) {
         SELECT COUNT(*)::int FROM post_likes WHERE post_id = p.id
       ) AS "likesCount",
       (
-        SELECT COUNT(*)::int FROM post_comments WHERE post_id = p.id
+        SELECT COUNT(*)::int FROM post_comments
+        WHERE post_id = p.id
+          AND COALESCE(moderation_status, 'approved') != 'removed'
       ) AS "commentsCount",
       EXISTS (
         SELECT 1 FROM post_likes WHERE post_id = p.id AND user_id = $1
@@ -63,7 +65,9 @@ async function getFeedPosts(userId, limit = 20) {
     FROM posts p
     JOIN profiles prof ON prof.user_id = p.user_id
     JOIN users u ON u.id = p.user_id
-    WHERE NOT EXISTS (
+    WHERE COALESCE(p.moderation_status, 'approved') != 'removed'
+      AND u.status = 'active'
+      AND NOT EXISTS (
       SELECT 1 FROM blocks b
       WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = p.user_id)
          OR (b.blocker_user_id = p.user_id AND b.blocked_user_id = $1)
@@ -281,7 +285,10 @@ async function assertCanInteractWithPost(userId, postId) {
   const res = await query(
     `SELECT p.user_id AS "authorId"
      FROM posts p
+     JOIN users u ON u.id = p.user_id
      WHERE p.id = $2
+       AND COALESCE(p.moderation_status, 'approved') != 'removed'
+       AND u.status = 'active'
        AND NOT EXISTS (
          SELECT 1 FROM blocks b
          WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = p.user_id)
@@ -355,6 +362,7 @@ async function getPostComments(postId, userId) {
      FROM post_comments c
      JOIN profiles prof ON prof.user_id = c.user_id
      WHERE c.post_id = $1
+       AND COALESCE(c.moderation_status, 'approved') != 'removed'
        AND NOT EXISTS (
          SELECT 1 FROM blocks b
          WHERE (b.blocker_user_id = $2 AND b.blocked_user_id = c.user_id)
@@ -368,6 +376,14 @@ async function getPostComments(postId, userId) {
 
 async function addPostComment(userId, postId, commentText, parentCommentId = null) {
   await assertCanInteractWithPost(userId, postId);
+  const postSettings = await query(
+    `SELECT COALESCE(is_comments_disabled, FALSE) AS "commentsDisabled"
+     FROM posts WHERE id = $1`,
+    [postId]
+  );
+  if (postSettings.rows[0]?.commentsDisabled) {
+    throw new ForbiddenError('Comments are disabled for this post', 'COMMENTS_DISABLED');
+  }
   let replyToUserId = null;
   if (parentCommentId) {
     const parentCheck = await query(`SELECT user_id FROM post_comments WHERE id = $1`, [parentCommentId]);

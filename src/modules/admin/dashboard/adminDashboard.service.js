@@ -10,55 +10,46 @@ async function getSummary(range = '7D') {
     if (cached) return JSON.parse(cached);
   } catch {}
 
-  const raw = await dashboardRepo.getAggregatedSummary(range);
+  const [raw, latestCampaign] = await Promise.all([
+    dashboardRepo.getAggregatedSummary(range),
+    dashboardRepo.getLatestCampaign(),
+  ]);
 
   // Generate sparklines and percentages
   const summary = {
     metrics: {
       totalUsers: {
         value: raw.totalUsers,
-        change: '+4.2%',
-        sparkline: [40, 45, 52, 58, 62, 70, raw.totalUsers % 100 || 80],
-        trend: 'up',
+        sparkline: [raw.totalUsers],
       },
       activeToday: {
         value: raw.activeToday,
-        change: '+8.4%',
-        sparkline: [120, 140, 165, 150, 180, 210, raw.activeToday || 230],
-        trend: 'up',
+        sparkline: [raw.activeToday],
       },
       onlineNow: {
-        value: Math.max(12, Math.floor(raw.activeToday * 0.18)),
-        change: '+12.1%',
-        sparkline: [10, 14, 18, 15, 22, 28, 30],
-        trend: 'up',
+        value: 0,
+        sparkline: [0],
       },
       newUsers: {
         value: raw.newUsersToday,
-        change: '+5.7%',
-        sparkline: [15, 20, 18, 25, 30, 28, raw.newUsersToday || 32],
-        trend: 'up',
+        sparkline: [raw.newUsersToday],
       },
       openReports: {
         value: raw.openReports,
-        change: '-2.1%',
-        sparkline: [35, 42, 38, 30, 28, 26, raw.openReports || 24],
-        trend: 'down',
+        sparkline: [raw.openReports],
         priorityHigh: raw.highPriorityReports,
       },
       pendingModeration: {
         value: raw.pendingPhotos + raw.pendingAppeals,
-        change: '-8.0%',
-        sparkline: [18, 15, 20, 14, 12, 10, raw.pendingPhotos + raw.pendingAppeals || 8],
-        trend: 'down',
+        sparkline: [raw.pendingPhotos + raw.pendingAppeals],
       },
     },
     secondary: {
-      likesToday: { value: raw.likesToday, change: '+14.2%' },
-      matchesToday: { value: raw.matchesToday, change: '+9.1%' },
-      messagesToday: { value: raw.messagesToday, change: '+18.5%' },
-      postsToday: { value: raw.postsToday, change: '+6.3%' },
-      suspensionsToday: { value: raw.suspensionsToday, change: '0.0%' },
+      likesToday: { value: raw.likesToday },
+      matchesToday: { value: raw.matchesToday },
+      messagesToday: { value: raw.messagesToday },
+      postsToday: { value: raw.postsToday },
+      suspensionsToday: { value: raw.suspensionsToday },
     },
     moderationQueue: {
       highPriorityReports: raw.highPriorityReports,
@@ -67,20 +58,7 @@ async function getSummary(range = '7D') {
       contentFlags: raw.openReports,
       appeals: raw.pendingAppeals,
     },
-    latestCampaign: {
-      name: 'Weekend Matches Spotlight',
-      sent: 42821,
-      delivered: 40918,
-      opened: 12442,
-      openRate: '30.4%',
-    },
-    systemHealth: {
-      api: 'healthy',
-      postgres: 'healthy',
-      redis: 'healthy',
-      websocket: 'healthy',
-      jobs: 'healthy',
-    },
+    latestCampaign,
   };
 
   try {
@@ -97,13 +75,15 @@ async function getLiveActivity() {
     if (cached) return JSON.parse(cached);
   } catch {}
 
+  const liveCounts = await dashboardRepo.getLiveActivity();
   const live = {
-    onlineNow: 3284,
-    discovering: 1042,
-    messagesPerMin: 327,
-    likesPerMin: 89,
-    matchesPerMin: 14,
-    feedViewsPerMin: 614,
+    onlineNow: Number(liveCounts.onlineNow || 0),
+    // Discovery-screen presence is not tracked separately yet.
+    discovering: 0,
+    messagesPerMin: Number(liveCounts.messagesPerMin || 0),
+    likesPerMin: Number(liveCounts.likesPerMin || 0),
+    matchesPerMin: Number(liveCounts.matchesPerMin || 0),
+    feedViewsPerMin: 0,
     timestamp: new Date().toISOString(),
   };
 
@@ -123,17 +103,13 @@ async function getChart(period = '7D') {
 
   const rows = await dashboardRepo.getChartSeries(period);
   
-  // Format chart data with smooth realistic defaults if no historical records exist
-  const series = rows.map((r, i) => {
-    const base = (i + 1) * 10;
-    return {
+  const series = rows.map((r) => ({
       date: new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      activeUsers: Number(r.activeUsers) || (18000 + base * 120),
-      likes: Number(r.likes) || (4200 + base * 45),
-      matches: Number(r.matches) || (650 + base * 12),
-      messages: Number(r.messages) || (12400 + base * 80),
-    };
-  });
+      activeUsers: Number(r.activeUsers) || 0,
+      likes: Number(r.likes) || 0,
+      matches: Number(r.matches) || 0,
+      messages: Number(r.messages) || 0,
+    }));
 
   try {
     await redis.set(cacheKey, JSON.stringify(series), 'EX', 60);

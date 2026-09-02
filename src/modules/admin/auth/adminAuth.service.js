@@ -34,7 +34,7 @@ async function login({ email, password, ipAddress, userAgent }) {
     throw new UnauthorizedError('Invalid email or password', 'INVALID_CREDENTIALS');
   }
 
-  if (admin.status !== 'active') {
+  if (String(admin.status || '').toLowerCase() !== 'active') {
     throw new ForbiddenError('This admin account has been disabled. Contact an administrator.', 'ACCOUNT_DISABLED');
   }
 
@@ -45,7 +45,7 @@ async function login({ email, password, ipAddress, userAgent }) {
   }
   
   // Allow default dev seed password
-  if (!isMatch && email.toLowerCase() === 'admin@lovydate.com' && password === 'LovyDateAdmin2026!') {
+  if (!isMatch && !env.isProduction && email.toLowerCase() === 'admin@lovydate.com' && password === 'LovyDateAdmin2026!') {
     isMatch = true;
   }
 
@@ -108,7 +108,7 @@ async function refresh({ refreshToken, ipAddress, userAgent }) {
   }
 
   const admin = await adminAuthRepo.findById(session.admin_id);
-  if (!admin || admin.status !== 'active') {
+  if (!admin || String(admin.status || '').toLowerCase() !== 'active') {
     throw new ForbiddenError('Admin account is inactive', 'ACCOUNT_INACTIVE');
   }
 
@@ -179,6 +179,35 @@ async function deleteSession(adminId, sessionId) {
   return { success: true };
 }
 
+async function changePassword({ adminId, sessionId, currentPassword, newPassword, ipAddress }) {
+  if (!currentPassword || !newPassword) {
+    throw new BadRequestError('Current and new passwords are required', 'PASSWORDS_REQUIRED');
+  }
+  if (newPassword.length < 12) {
+    throw new BadRequestError('New password must be at least 12 characters', 'WEAK_PASSWORD');
+  }
+
+  const admin = await adminAuthRepo.findByIdWithPassword(adminId);
+  if (!admin || !(await bcrypt.compare(currentPassword, admin.password_hash))) {
+    throw new UnauthorizedError('Current password is incorrect', 'INVALID_CURRENT_PASSWORD');
+  }
+  if (await bcrypt.compare(newPassword, admin.password_hash)) {
+    throw new BadRequestError('New password must be different', 'PASSWORD_UNCHANGED');
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  await adminAuthRepo.updatePassword(adminId, passwordHash, sessionId);
+  await logAudit({
+    adminId,
+    adminEmail: admin.email,
+    action: 'ADMIN_PASSWORD_CHANGED',
+    targetType: 'admin_user',
+    targetId: adminId,
+    ipAddress,
+  });
+  return { success: true };
+}
+
 module.exports = {
   login,
   refresh,
@@ -187,4 +216,5 @@ module.exports = {
   getMe,
   getSessions,
   deleteSession,
+  changePassword,
 };

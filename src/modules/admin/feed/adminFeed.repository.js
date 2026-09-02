@@ -20,7 +20,7 @@ async function listFeedPosts({ tab = 'recent', search, limit = 25, cursor }) {
     conditions.push(`(
       LOWER(p.content) LIKE $${params.length}
       OR LOWER(prof.display_name) LIKE $${params.length}
-      OR p.id::text = '${search.trim()}'
+      OR p.id::text = $${params.length}
     )`);
   }
 

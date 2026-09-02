@@ -2,6 +2,13 @@ const usersRepo = require('./adminUsers.repository');
 const { logAudit } = require('../audit/adminAudit.service');
 const { NotFoundError, BadRequestError } = require('../../../shared/errors');
 
+const ALLOWED_RESTRICTION_TYPES = new Set([
+  'ACCOUNT_SUSPENSION',
+  'MESSAGING_DISABLED',
+  'FEED_POSTING_DISABLED',
+  'PROFILE_REVIEW_REQUIRED',
+]);
+
 async function listUsers(params) {
   return usersRepo.listUsers(params);
 }
@@ -90,6 +97,9 @@ async function unsuspendUser({ userId, reason, admin, ipAddress }) {
 
 async function addRestriction({ userId, restrictionType, reason, internalNote, durationDays, admin, ipAddress }) {
   if (!restrictionType || !reason) throw new BadRequestError('Restriction type and reason are required');
+  if (!ALLOWED_RESTRICTION_TYPES.has(restrictionType)) {
+    throw new BadRequestError('Unsupported restriction type', 'INVALID_RESTRICTION_TYPE');
+  }
 
   const expiresAt = durationDays && parseInt(durationDays, 10) > 0
     ? new Date(Date.now() + parseInt(durationDays, 10) * 24 * 60 * 60 * 1000)
