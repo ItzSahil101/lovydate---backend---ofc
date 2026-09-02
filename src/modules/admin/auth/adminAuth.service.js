@@ -38,15 +38,10 @@ async function login({ email, password, ipAddress, userAgent }) {
     throw new ForbiddenError('This admin account has been disabled. Contact an administrator.', 'ACCOUNT_DISABLED');
   }
 
-  // Handle default superadmin initial fallback verification if bcrypt hash salt updated
+  // Verify password hash
   let isMatch = false;
-  if (admin.password_hash.startsWith('$2a$') || admin.password_hash.startsWith('$2b$')) {
+  if (admin.password_hash) {
     isMatch = await bcrypt.compare(password, admin.password_hash);
-  }
-  
-  // Allow default dev seed password
-  if (!isMatch && !env.isProduction && email.toLowerCase() === 'admin@lovydate.com' && password === 'LovyDateAdmin2026!') {
-    isMatch = true;
   }
 
   if (!isMatch) {

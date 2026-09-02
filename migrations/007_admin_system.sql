@@ -470,14 +470,12 @@ INSERT INTO admin_role_permissions (role_id, permission_id) VALUES
 ON CONFLICT DO NOTHING;
 
 -- 8. Seed Default Super Admin Account
--- Password hash for 'LovyDateAdmin2026!' ($2a$10$7Z2vS89K9i2f9Q9z4n4u/.Z3Xw9Xv7OqM07VvN/x3iF5JqA6n3H2m)
--- We will also generate the bcrypt hash in admin auth if needed
 INSERT INTO admin_users (id, email, password_hash, display_name, status)
 VALUES (
   '00000000-0000-0000-0000-000000000001',
-  'admin@lovydate.com',
-  '$2a$10$eE08Xb5uB7Uu/b9Q9J57jOPp1jM31B5z3j.B6kZ3.63x3i0.V2x6e',
-  'Super Admin',
+  'sameerlamichhane00@gmail.com',
+  '$2a$12$NqLsp.n8mFh71bH5Lgq5/ecF/o4jA1GgG7YI0W7Jv9pB9P5P5rKye',
+  'Sameer Lamichhane',
   'active'
 )
 ON CONFLICT (email) DO NOTHING;

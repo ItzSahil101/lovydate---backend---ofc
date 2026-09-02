@@ -13,7 +13,8 @@
     "seed": "node src/infrastructure/database/seed_profiles.js",
     "test": "jest tests/unit.test.js --forceExit",
     "test:e2e": "jest tests/*.test.js --runInBand --detectOpenHandles --forceExit",
-    "transfer:s3": "node src/infrastructure/s3/migrate_uploads_to_s3.js"
+    "transfer:s3": "node src/infrastructure/s3/migrate_uploads_to_s3.js",
+    "create:admin": "node scripts/create_admin.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1123.0",

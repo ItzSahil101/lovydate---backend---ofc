@@ -30,7 +30,7 @@ async function startServer() {
     return;
   }
 
-  server.listen(env.port, () => {
+  server.listen(env.port, '0.0.0.0', () => {
     console.log(`LovyDate Production Backend listening on port ${env.port} (${env.nodeEnv})`);
   });
 }

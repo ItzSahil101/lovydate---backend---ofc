@@ -41,5 +41,26 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { requireAuth, touchUserActivity };
+function optionalAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.substring(7);
+  try {
+    const decoded = jwt.verify(token, env.jwt.secret);
+    req.user = {
+      userId: decoded.userId,
+      email: decoded.email,
+    };
+    touchUserActivity(decoded.userId);
+  } catch {
+    // Optional auth ignores invalid/expired token
+  }
+  return next();
+}
+
+module.exports = { requireAuth, optionalAuth, touchUserActivity };
+
 
