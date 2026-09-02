@@ -134,7 +134,7 @@ async function addMessage(caseId, senderType, senderId, senderName, senderRole, 
   const res = await query(
     `INSERT INTO support_messages (case_id, sender_type, sender_id, sender_name, sender_role, message, attachments)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, sender_type AS "senderType", sender_id AS "senderId", sender_name AS "senderName", sender_role AS "senderRole", message, created_at AS "createdAt"`,
+     RETURNING id, sender_type AS "senderType", sender_id AS "senderId", sender_name AS "senderName", sender_role AS "senderRole", message, attachments, created_at AS "createdAt"`,
     [caseId, senderType, senderId, senderName || null, senderRole || null, message, JSON.stringify(attachments)]
   );
 
@@ -163,6 +163,10 @@ async function updateCase(caseId, fields) {
   if (fields.priority) {
     params.push(fields.priority);
     updates.push(`priority = $${params.length}`);
+  }
+  if (fields.category) {
+    params.push(fields.category);
+    updates.push(`category = $${params.length}`);
   }
   if (fields.assignedAdminId !== undefined) {
     params.push(fields.assignedAdminId || null);

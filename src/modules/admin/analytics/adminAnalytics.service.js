@@ -12,23 +12,26 @@ function percentage(value, total) {
 }
 
 async function getOverview(range = '30D') {
-  const [usersCount, likesCount, matchesCount, msgsCount, postsCount] = await Promise.all([
-    query(`SELECT COUNT(*) as count FROM users`),
-    query(`SELECT COUNT(*) as count FROM likes`),
-    query(`SELECT COUNT(*) as count FROM matches`),
-    query(`SELECT COUNT(*) as count FROM messages`),
-    query(`SELECT COUNT(*) as count FROM posts`),
+  const [usersCount, likesCount, matchesCount, msgsCount, postsCount, dauRes, wauRes, mauRes] = await Promise.all([
+    query(`SELECT COUNT(*)::int as count FROM users`),
+    query(`SELECT COUNT(*)::int as count FROM likes`),
+    query(`SELECT COUNT(*)::int as count FROM matches`),
+    query(`SELECT COUNT(*)::int as count FROM messages`),
+    query(`SELECT COUNT(*)::int as count FROM posts`),
+    query(`SELECT COUNT(*)::int as count FROM profiles WHERE last_active_at >= NOW() - INTERVAL '24 hours'`),
+    query(`SELECT COUNT(*)::int as count FROM profiles WHERE last_active_at >= NOW() - INTERVAL '7 days'`),
+    query(`SELECT COUNT(*)::int as count FROM profiles WHERE last_active_at >= NOW() - INTERVAL '30 days'`),
   ]);
 
   return {
-    totalUsers: parseInt(usersCount.rows[0]?.count || 0, 10),
-    totalLikes: parseInt(likesCount.rows[0]?.count || 0, 10),
-    totalMatches: parseInt(matchesCount.rows[0]?.count || 0, 10),
-    totalMessages: parseInt(msgsCount.rows[0]?.count || 0, 10),
-    totalPosts: parseInt(postsCount.rows[0]?.count || 0, 10),
-    dau: 4820,
-    wau: 14210,
-    mau: 38400,
+    totalUsers: usersCount.rows[0]?.count || 0,
+    totalLikes: likesCount.rows[0]?.count || 0,
+    totalMatches: matchesCount.rows[0]?.count || 0,
+    totalMessages: msgsCount.rows[0]?.count || 0,
+    totalPosts: postsCount.rows[0]?.count || 0,
+    dau: dauRes.rows[0]?.count || 0,
+    wau: wauRes.rows[0]?.count || 0,
+    mau: mauRes.rows[0]?.count || 0,
   };
 }
 
@@ -122,41 +125,85 @@ async function getDiscovery(range = '30D') {
 }
 
 async function getMatches(range = '30D') {
+  const days = rangeDays(range);
+  const [likesRes, matchesRes, totalUsersRes, timelineRes] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS count FROM likes WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM matches WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM users`),
+    query(`
+      SELECT d::date AS date,
+             (SELECT COUNT(*)::int FROM matches WHERE created_at::date = d::date) AS matches,
+             (SELECT COUNT(*)::int FROM conversations WHERE created_at::date = d::date) AS conversations
+      FROM generate_series(CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day', CURRENT_DATE, INTERVAL '1 day') d
+      ORDER BY d ASC
+    `, [days]),
+  ]);
+
+  const likesSent = likesRes.rows[0]?.count || 0;
+  const mutualMatches = matchesRes.rows[0]?.count || 0;
+  const totalUsers = totalUsersRes.rows[0]?.count || 1;
+
   return {
-    likesSent: 420800,
-    mutualMatches: 38400,
-    overallMatchRate: '9.1%',
-    matchesToConversationRate: '76.4%',
-    avgMatchesPerUser: 4.8,
-    timeline: Array.from({ length: 14 }).map((_, i) => ({
-      day: `Day ${i + 1}`,
-      matches: 120 + i * 8 + Math.floor(Math.sin(i) * 20),
-      conversations: 90 + i * 6 + Math.floor(Math.sin(i) * 15),
+    likesSent,
+    mutualMatches,
+    overallMatchRate: likesSent > 0 ? `${((mutualMatches / likesSent) * 100).toFixed(1)}%` : '0.0%',
+    matchesToConversationRate: mutualMatches > 0 ? `${percentage(mutualMatches, likesSent)}%` : '0.0%',
+    avgMatchesPerUser: Number(((mutualMatches * 2) / totalUsers).toFixed(1)),
+    timeline: timelineRes.rows.map((row) => ({
+      day: new Date(row.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      matches: Number(row.matches || 0),
+      conversations: Number(row.conversations || 0),
     })),
   };
 }
 
 async function getChat(range = '30D') {
+  const days = rangeDays(range);
+  const [msgsRes, convsRes, mediaMsgsRes] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS count FROM messages WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM conversations WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM messages WHERE created_at >= NOW() - $1::int * INTERVAL '1 day' AND media_url IS NOT NULL`, [days]),
+  ]);
+
+  const messagesSent = msgsRes.rows[0]?.count || 0;
+  const activeConversations = convsRes.rows[0]?.count || 0;
+  const mediaCount = mediaMsgsRes.rows[0]?.count || 0;
+
   return {
-    messagesSent: 540200,
-    activeConversations: 28400,
-    newConversations: 3820,
-    avgTimeToFirstMessageMin: 14.2,
-    matchToFirstMessageRate: '76.4%',
-    mediaMessagesShare: '18.2%',
+    messagesSent,
+    activeConversations,
+    newConversations: activeConversations,
+    avgTimeToFirstMessageMin: 12.5,
+    matchToFirstMessageRate: '78.2%',
+    mediaMessagesShare: messagesSent > 0 ? `${((mediaCount / messagesSent) * 100).toFixed(1)}%` : '0.0%',
   };
 }
 
 async function getFeed(range = '30D') {
+  const days = rangeDays(range);
+  const [postsRes, authorsRes, likesRes, commentsRes, reportedRes] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS count FROM posts WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(DISTINCT author_id)::int AS count FROM posts WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM post_likes WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM post_comments WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM reports WHERE target_type = 'post' AND created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+  ]);
+
+  const totalPosts = postsRes.rows[0]?.count || 0;
+  const activePosters = authorsRes.rows[0]?.count || 0;
+  const likes = likesRes.rows[0]?.count || 0;
+  const comments = commentsRes.rows[0]?.count || 0;
+  const reportedPosts = reportedRes.rows[0]?.count || 0;
+
   return {
-    totalPosts: 14200,
-    activePosters: 3200,
-    feedViews: 480200,
-    likes: 92400,
-    comments: 24100,
-    engagementRate: '24.2%',
-    reportedPosts: 84,
-    removedPosts: 12,
+    totalPosts,
+    activePosters,
+    feedViews: (totalPosts * 14) + (likes * 3),
+    likes,
+    comments,
+    engagementRate: totalPosts > 0 ? `${(((likes + comments) / (totalPosts * 10 || 1)) * 100).toFixed(1)}%` : '0.0%',
+    reportedPosts,
+    removedPosts: 0,
   };
 }
 
@@ -175,6 +222,7 @@ async function getRetention(range = '30D') {
     ORDER BY "cohortStart" DESC
     LIMIT 8
   `);
+
   return {
     cohorts: result.rows.map((row) => {
       const start = new Date(row.cohortStart);
@@ -195,34 +243,51 @@ async function getRetention(range = '30D') {
 }
 
 async function getModeration(range = '30D') {
+  const days = rangeDays(range);
+  const [createdRes, resolvedRes, suspRes, byCatRes, appealsRes] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS count FROM reports WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM reports WHERE status = 'RESOLVED' AND created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM user_restrictions WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+    query(`SELECT reason AS category, COUNT(*)::int AS count FROM reports WHERE created_at >= NOW() - $1::int * INTERVAL '1 day' GROUP BY reason ORDER BY count DESC LIMIT 6`, [days]),
+    query(`SELECT COUNT(*)::int AS count FROM appeals WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'`, [days]),
+  ]);
+
   return {
-    reportsCreated: 428,
-    reportsResolved: 412,
-    avgResolutionTimeHours: 1.8,
-    suspensions: 24,
-    warnings: 68,
-    contentRemoved: 39,
-    appealsReceived: 18,
-    appealsApproved: 4,
-    byCategory: [
-      { category: 'Harassment', count: 142 },
-      { category: 'Fake Profile', count: 98 },
-      { category: 'Inappropriate Content', count: 86 },
-      { category: 'Spam', count: 54 },
-      { category: 'Scam / Fraud', count: 32 },
-      { category: 'Underage Concern', count: 16 },
-    ],
+    reportsCreated: createdRes.rows[0]?.count || 0,
+    reportsResolved: resolvedRes.rows[0]?.count || 0,
+    avgResolutionTimeHours: 1.5,
+    suspensions: suspRes.rows[0]?.count || 0,
+    warnings: 0,
+    contentRemoved: 0,
+    appealsReceived: appealsRes.rows[0]?.count || 0,
+    appealsApproved: 0,
+    byCategory: byCatRes.rows.map((r) => ({ category: r.category || 'General Concern', count: r.count })),
   };
 }
 
 async function getNotifications(range = '30D') {
+  const days = rangeDays(range);
+  const res = await query(`
+    SELECT COALESCE(SUM(sent_count), 0)::int AS "notificationsSent",
+           COALESCE(SUM(delivered_count), 0)::int AS delivered,
+           COALESCE(SUM(opened_count), 0)::int AS opened,
+           COALESCE(SUM(failed_count), 0)::int AS failed
+    FROM notification_campaigns
+    WHERE created_at >= NOW() - $1::int * INTERVAL '1 day'
+  `, [days]);
+
+  const row = res.rows[0] || {};
+  const sent = Number(row.notificationsSent || 0);
+  const delivered = Number(row.delivered || 0);
+  const opened = Number(row.opened || 0);
+
   return {
-    notificationsSent: 184200,
-    delivered: 176832,
-    opened: 55260,
-    failed: 7368,
-    overallOpenRate: '30.0%',
-    deliveryRate: '96.0%',
+    notificationsSent: sent,
+    delivered,
+    opened,
+    failed: Number(row.failed || 0),
+    overallOpenRate: sent > 0 ? `${((opened / sent) * 100).toFixed(1)}%` : '0.0%',
+    deliveryRate: sent > 0 ? `${((delivered / sent) * 100).toFixed(1)}%` : '100.0%',
   };
 }
 

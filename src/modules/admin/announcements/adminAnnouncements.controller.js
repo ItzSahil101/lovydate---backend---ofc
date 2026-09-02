@@ -29,6 +29,17 @@ async function createAnnouncement(req, res, next) {
   }
 }
 
+async function broadcastAnnouncement(req, res, next) {
+  try {
+    const { announcementId } = req.params;
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const result = await announcementsService.broadcastAnnouncement(announcementId, req.admin, ipAddress);
+    res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function updateAnnouncement(req, res, next) {
   try {
     const { announcementId } = req.params;
@@ -55,6 +66,7 @@ module.exports = {
   listAnnouncements,
   getAnnouncementDetail,
   createAnnouncement,
+  broadcastAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
 };

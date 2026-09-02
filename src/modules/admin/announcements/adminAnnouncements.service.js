@@ -1,6 +1,8 @@
 const announcementsRepo = require('./adminAnnouncements.repository');
 const { logAudit } = require('../audit/adminAudit.service');
 const { NotFoundError, BadRequestError } = require('../../../shared/errors');
+const { broadcastPushNotification } = require('../../../infrastructure/firebase/fcm');
+const { emitToAll } = require('../../../infrastructure/websocket/socketServer');
 
 async function listAnnouncements() {
   return announcementsRepo.listAnnouncements();
@@ -19,6 +21,32 @@ async function createAnnouncement(data, admin, ipAddress) {
 
   const announcement = await announcementsRepo.createAnnouncement(data, admin.id);
 
+  if (announcement.is_active !== false) {
+    // Broadcast via WebSockets & FCM Push Notifications
+    emitToAll('announcement:new', {
+      id: announcement.id,
+      title: announcement.title,
+      message: announcement.message,
+      type: announcement.type,
+      imageUrl: announcement.image_url,
+      ctaLabel: announcement.cta_label,
+      ctaDestination: announcement.cta_destination,
+      priority: announcement.priority,
+      dismissible: announcement.dismissible,
+      createdAt: announcement.created_at,
+    });
+
+    broadcastPushNotification({
+      title: announcement.title,
+      body: announcement.message,
+      data: {
+        type: 'announcement',
+        announcementId: announcement.id,
+        ctaDestination: announcement.cta_destination || 'open_app',
+      },
+    }).catch(() => {});
+  }
+
   await logAudit({
     adminId: admin.id,
     adminEmail: admin.email,
@@ -30,6 +58,46 @@ async function createAnnouncement(data, admin, ipAddress) {
   });
 
   return announcement;
+}
+
+async function broadcastAnnouncement(id, admin, ipAddress) {
+  const announcement = await announcementsRepo.getAnnouncementDetail(id);
+  if (!announcement) throw new NotFoundError('Announcement not found');
+
+  emitToAll('announcement:new', {
+    id: announcement.id,
+    title: announcement.title,
+    message: announcement.message,
+    type: announcement.type,
+    imageUrl: announcement.image_url,
+    ctaLabel: announcement.cta_label,
+    ctaDestination: announcement.cta_destination,
+    priority: announcement.priority,
+    dismissible: announcement.dismissible,
+    createdAt: announcement.created_at,
+  });
+
+  const pushResult = await broadcastPushNotification({
+    title: announcement.title,
+    body: announcement.message,
+    data: {
+      type: 'announcement',
+      announcementId: announcement.id,
+      ctaDestination: announcement.cta_destination || 'open_app',
+    },
+  });
+
+  await logAudit({
+    adminId: admin.id,
+    adminEmail: admin.email,
+    action: 'ANNOUNCEMENT_BROADCASTED',
+    targetType: 'announcement',
+    targetId: id,
+    details: { title: announcement.title },
+    ipAddress,
+  });
+
+  return { success: true, message: `Announcement broadcasted to devices.`, pushResult };
 }
 
 async function updateAnnouncement(id, data, admin, ipAddress) {
@@ -67,6 +135,7 @@ module.exports = {
   listAnnouncements,
   getAnnouncementDetail,
   createAnnouncement,
+  broadcastAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
 };

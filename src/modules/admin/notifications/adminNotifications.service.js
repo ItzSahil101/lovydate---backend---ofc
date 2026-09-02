@@ -6,12 +6,12 @@ async function getNotificationStats() {
   const [statusTodayRes, recentSendsRes, templatesRes] = await Promise.all([
     query(`
       SELECT
-        COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened'))::int AS "sentToday",
-        COUNT(*) FILTER (WHERE status IN ('delivered', 'opened'))::int AS "deliveredToday",
-        COUNT(*) FILTER (WHERE status = 'opened')::int AS "openedToday",
-        COUNT(*) FILTER (WHERE status = 'failed')::int AS "failedToday"
-      FROM notification_deliveries
-      WHERE created_at >= NOW() - INTERVAL '24 hours'
+        COALESCE(SUM(sent_count), 0)::int AS "sentToday",
+        COALESCE(SUM(delivered_count), 0)::int AS "deliveredToday",
+        COALESCE(SUM(opened_count), 0)::int AS "openedToday",
+        COALESCE(SUM(failed_count), 0)::int AS "failedToday"
+      FROM notification_campaigns
+      WHERE sent_at >= NOW() - INTERVAL '24 hours'
     `),
     query(
       `SELECT c.id, c.name, c.title, c.sent_at AS "sentAt", c.sent_count AS "sentCount",

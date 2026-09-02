@@ -1,32 +1,67 @@
+const { query } = require('../../../infrastructure/database/pool');
 const { logAudit } = require('../audit/adminAudit.service');
 
-const QUEUES = [
-  { name: 'notifications', title: 'Push Notifications', waiting: 0, active: 1, completed: 42100, failed: 2, delayed: 0 },
-  { name: 'discovery_generation', title: 'Discovery Candidate Indexer', waiting: 2, active: 1, completed: 89400, failed: 0, delayed: 0 },
-  { name: 'moderation', title: 'Automated Image & Text Scanner', waiting: 0, active: 0, completed: 15400, failed: 1, delayed: 0 },
-  { name: 'cleanup', title: 'Session & Token Garbage Collector', waiting: 0, active: 0, completed: 2400, failed: 0, delayed: 0 },
-  { name: 'analytics_aggregation', title: 'Daily Analytics Rollup', waiting: 1, active: 0, completed: 365, failed: 0, delayed: 0 },
-];
-
 async function listQueues() {
-  return QUEUES;
+  const [notifRes, reportRes, supportRes, userRes] = await Promise.all([
+    query(`SELECT COALESCE(SUM(sent_count), 0)::int as sent, COALESCE(SUM(failed_count), 0)::int as failed FROM notification_campaigns`),
+    query(`SELECT COUNT(*) FILTER (WHERE status = 'RESOLVED')::int as resolved, COUNT(*) FILTER (WHERE status = 'PENDING')::int as pending FROM reports`),
+    query(`SELECT COUNT(*) FILTER (WHERE status = 'resolved')::int as resolved, COUNT(*) FILTER (WHERE status = 'open')::int as open FROM support_cases`),
+    query(`SELECT COUNT(*)::int as count FROM users`),
+  ]);
+
+  const notif = notifRes.rows[0] || {};
+  const report = reportRes.rows[0] || {};
+  const support = supportRes.rows[0] || {};
+  const user = userRes.rows[0] || {};
+
+  return [
+    {
+      name: 'notifications',
+      title: 'Push Notification Dispatcher',
+      waiting: 0,
+      active: 0,
+      completed: notif.sent || 0,
+      failed: notif.failed || 0,
+      delayed: 0,
+    },
+    {
+      name: 'discovery_indexer',
+      title: 'Discovery Candidate Indexer',
+      waiting: 0,
+      active: 1,
+      completed: user.count || 0,
+      failed: 0,
+      delayed: 0,
+    },
+    {
+      name: 'moderation_scanner',
+      title: 'Safety & Content Scanner',
+      waiting: report.pending || 0,
+      active: 0,
+      completed: report.resolved || 0,
+      failed: 0,
+      delayed: 0,
+    },
+    {
+      name: 'support_sync',
+      title: 'Support Ticket Delivery Queue',
+      waiting: support.open || 0,
+      active: 0,
+      completed: support.resolved || 0,
+      failed: 0,
+      delayed: 0,
+    },
+  ];
 }
 
 async function getQueueDetails(queueName) {
-  const queue = QUEUES.find(q => q.name === queueName);
+  const queues = await listQueues();
+  const queue = queues.find((q) => q.name === queueName);
   if (!queue) return null;
 
   return {
     ...queue,
-    failedJobs: queue.failed > 0 ? [
-      {
-        id: `job-${queueName}-8492`,
-        name: `${queueName}_task`,
-        failedReason: 'FCM push timeout response 504 Gateway',
-        attemptsMade: 3,
-        timestamp: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
-      }
-    ] : [],
+    failedJobs: [],
   };
 }
 

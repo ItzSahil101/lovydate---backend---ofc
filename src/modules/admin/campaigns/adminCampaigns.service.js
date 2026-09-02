@@ -1,6 +1,8 @@
 const campaignsRepo = require('./adminCampaigns.repository');
 const { logAudit } = require('../audit/adminAudit.service');
 const { NotFoundError, BadRequestError } = require('../../../shared/errors');
+const { broadcastPushNotification } = require('../../../infrastructure/firebase/fcm');
+const { emitToAll } = require('../../../infrastructure/websocket/socketServer');
 
 async function listCampaigns(params) {
   return campaignsRepo.listCampaigns(params);
@@ -21,6 +23,26 @@ async function createCampaign(data, admin, ipAddress) {
     ...data,
     adminId: admin.id,
   });
+
+  if (campaign.status === 'SENT') {
+    broadcastPushNotification({
+      title: campaign.title,
+      body: campaign.body,
+      data: {
+        type: 'campaign',
+        campaignId: campaign.id,
+        destinationType: campaign.destinationType || 'open_app',
+      },
+    }).catch(() => {});
+
+    emitToAll('campaign:new', {
+      id: campaign.id,
+      title: campaign.title,
+      body: campaign.body,
+      destinationType: campaign.destinationType,
+      sentAt: campaign.sentAt || new Date(),
+    });
+  }
 
   await logAudit({
     adminId: admin.id,
@@ -123,6 +145,25 @@ async function sendCampaign({ campaignId, admin, ipAddress }) {
     audienceCount: estimatedCount,
     sentCount: estimatedCount,
     deliveredCount: Math.floor(estimatedCount * 0.95),
+  });
+
+  // Real-time Push & WebSocket Broadcast to audience
+  broadcastPushNotification({
+    title: campaign.title,
+    body: campaign.body,
+    data: {
+      type: 'campaign',
+      campaignId: campaign.id,
+      destinationType: campaign.destinationType || 'open_app',
+    },
+  }).catch(() => {});
+
+  emitToAll('campaign:new', {
+    id: campaign.id,
+    title: campaign.title,
+    body: campaign.body,
+    destinationType: campaign.destinationType,
+    sentAt: new Date(),
   });
 
   await logAudit({

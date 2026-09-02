@@ -9,6 +9,7 @@ router.use(requireAdminAuth);
 router.get('/', requirePermission('announcements.read'), controller.listAnnouncements);
 router.post('/', requirePermission('announcements.manage'), controller.createAnnouncement);
 router.get('/:announcementId', requirePermission('announcements.read'), controller.getAnnouncementDetail);
+router.post('/:announcementId/broadcast', requirePermission('announcements.manage'), controller.broadcastAnnouncement);
 router.patch('/:announcementId', requirePermission('announcements.manage'), controller.updateAnnouncement);
 router.delete('/:announcementId', requirePermission('announcements.manage'), controller.deleteAnnouncement);
 

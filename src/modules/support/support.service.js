@@ -1,28 +1,53 @@
 const { query } = require('../../infrastructure/database/pool');
-const { BadRequestError, NotFoundError } = require('../../shared/errors');
+const { BadRequestError, NotFoundError, ForbiddenError } = require('../../shared/errors');
 
-async function createPublicTicket({ name, email, subject, category, message, priority = 'medium' }) {
-  if (!name || !email || !message) {
-    throw new BadRequestError('Name, email, and message are required');
+async function checkUserRestriction(userId, email) {
+  if (!userId && !email) return null;
+
+  let targetId = userId;
+  if (!targetId && email) {
+    const userRes = await query(`SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email.trim()]);
+    targetId = userRes.rows[0]?.id || null;
+  }
+
+  if (!targetId) return null;
+
+  const res = await query(
+    `SELECT restriction_type AS "restrictionType", reason, expires_at AS "expiresAt"
+     FROM user_restrictions
+     WHERE user_id = $1
+       AND is_active = TRUE
+       AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [targetId]
+  );
+
+  return res.rows[0] || null;
+}
+
+async function createPublicTicket({ name, email, subject, category, message, attachments = [], priority = 'medium' }) {
+  if (!name || !email || (!message && (!attachments || attachments.length === 0))) {
+    throw new BadRequestError('Name, email, and message or attachment are required');
   }
 
   // Find if user already exists with this email
-  const userRes = await query(`SELECT id FROM users WHERE email = $1`, [email.toLowerCase().trim()]);
+  const userRes = await query(`SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email.toLowerCase().trim()]);
   const userId = userRes.rows[0]?.id || null;
 
   const caseRes = await query(
     `INSERT INTO support_cases (user_id, customer_name, customer_email, subject, category, priority, status)
      VALUES ($1, $2, $3, $4, $5, $6, 'open')
      RETURNING id, subject, category, status, created_at AS "createdAt"`,
-    [userId, name.trim(), email.toLowerCase().trim(), subject?.trim() || 'General Inquiry', category || 'General', priority]
+    [userId, name.trim(), email.toLowerCase().trim(), subject?.trim() || category || 'General Inquiry', category || 'General', priority]
   );
   const newCase = caseRes.rows[0];
 
   const msgRes = await query(
-    `INSERT INTO support_messages (case_id, sender_type, sender_id, sender_name, sender_role, message)
-     VALUES ($1, 'user', $2, $3, 'CUSTOMER', $4)
-     RETURNING id, sender_type AS "senderType", sender_name AS "senderName", sender_role AS "senderRole", message, created_at AS "createdAt"`,
-    [newCase.id, userId, name.trim(), message.trim()]
+    `INSERT INTO support_messages (case_id, sender_type, sender_id, sender_name, sender_role, message, attachments)
+     VALUES ($1, 'user', $2, $3, 'CUSTOMER', $4, $5)
+     RETURNING id, sender_type AS "senderType", sender_name AS "senderName", sender_role AS "senderRole", message, attachments, created_at AS "createdAt"`,
+    [newCase.id, userId, name.trim(), (message || '').trim(), JSON.stringify(attachments || [])]
   );
 
   return {
@@ -36,7 +61,9 @@ async function getPublicTicket(ticketId) {
     `SELECT sc.id, sc.subject, sc.category, sc.priority, sc.status,
             sc.customer_name AS "customerName", sc.customer_email AS "customerEmail",
             sc.created_at AS "createdAt", sc.resolved_at AS "resolvedAt",
-            au.display_name AS "assignedAdminName"
+            au.display_name AS "assignedAdminName",
+            au.avatar_url AS "assignedAdminAvatar",
+            COALESCE(au.last_login_at, au.updated_at, sc.created_at) AS "staffLastActiveAt"
      FROM support_cases sc
      LEFT JOIN admin_users au ON sc.assigned_admin_id = au.id
      WHERE sc.id = $1`,
@@ -45,6 +72,12 @@ async function getPublicTicket(ticketId) {
 
   if (caseRes.rows.length === 0) throw new NotFoundError('Support ticket not found');
   const ticket = caseRes.rows[0];
+
+  // Global latest staff active timestamp
+  const staffActiveRes = await query(`SELECT MAX(COALESCE(last_login_at, updated_at)) AS "latestStaffActiveAt" FROM admin_users WHERE status = 'ACTIVE'`);
+  const latestStaffActiveAt = staffActiveRes.rows[0]?.latestStaffActiveAt || ticket.staffLastActiveAt;
+
+  const restriction = await checkUserRestriction(ticket.userId, ticket.customerEmail);
 
   const messagesRes = await query(
     `SELECT sm.id, sm.sender_type AS "senderType", sm.sender_id AS "senderId",
@@ -61,27 +94,40 @@ async function getPublicTicket(ticketId) {
 
   return {
     ...ticket,
+    staffLastActiveAt: latestStaffActiveAt,
+    isRestricted: Boolean(restriction),
+    restrictionReason: restriction ? 'Messaging privileges are disabled on your account.' : null,
     messages: messagesRes.rows,
   };
 }
 
-async function sendCustomerMessage(ticketId, { name, message }) {
-  if (!message || !message.trim()) {
-    throw new BadRequestError('Message cannot be empty');
+async function sendCustomerMessage(ticketId, { name, message, attachments = [] }) {
+  if (!message?.trim() && (!attachments || attachments.length === 0)) {
+    throw new BadRequestError('Message or attachment is required');
   }
 
-  const caseRes = await query(`SELECT id, status FROM support_cases WHERE id = $1`, [ticketId]);
+  const caseRes = await query(`SELECT id, user_id AS "userId", customer_email AS "customerEmail", status FROM support_cases WHERE id = $1`, [ticketId]);
   if (caseRes.rows.length === 0) throw new NotFoundError('Ticket not found');
+  const ticket = caseRes.rows[0];
+
+  if (ticket.status === 'resolved' || ticket.status === 'closed') {
+    throw new BadRequestError('This ticket has been resolved. The conversation has ended.', 'TICKET_RESOLVED');
+  }
+
+  const restriction = await checkUserRestriction(ticket.userId, ticket.customerEmail);
+  if (restriction) {
+    throw new ForbiddenError(
+      'Messaging privileges are disabled on your account.',
+      'MESSAGING_RESTRICTED'
+    );
+  }
 
   const msgRes = await query(
-    `INSERT INTO support_messages (case_id, sender_type, sender_name, sender_role, message)
-     VALUES ($1, 'user', $2, 'CUSTOMER', $3)
-     RETURNING id, sender_type AS "senderType", sender_name AS "senderName", sender_role AS "senderRole", message, created_at AS "createdAt"`,
-    [ticketId, name || 'Customer', message.trim()]
+    `INSERT INTO support_messages (case_id, sender_type, sender_name, sender_role, message, attachments)
+     VALUES ($1, 'user', $2, 'CUSTOMER', $3, $4)
+     RETURNING id, sender_type AS "senderType", sender_name AS "senderName", sender_role AS "senderRole", message, attachments, created_at AS "createdAt"`,
+    [ticketId, name || 'Customer', (message || '').trim(), JSON.stringify(attachments || [])]
   );
-
-  // If case was waiting or resolved, reopen it to 'open'
-  await query(`UPDATE support_cases SET status = 'open', updated_at = NOW() WHERE id = $1`, [ticketId]);
 
   return msgRes.rows[0];
 }

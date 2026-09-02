@@ -132,8 +132,46 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
   }
 }
 
+async function broadcastPushNotification({ title, body, data = {}, userIds = null }) {
+  try {
+    let sql = `SELECT device_token FROM user_devices WHERE device_token IS NOT NULL`;
+    const params = [];
+    if (userIds && userIds.length > 0) {
+      params.push(userIds);
+      sql += ` AND user_id = ANY($1::uuid[])`;
+    }
+    const res = await query(sql, params);
+    if (res.rows.length === 0) {
+      console.log(`[FCM Broadcast] No device tokens found to receive broadcast "${title}"`);
+      return { totalTokens: 0, sent: 0 };
+    }
+
+    const tokens = res.rows.map((r) => r.device_token);
+    if (firebaseApp || getApps().length > 0) {
+      const messaging = getMessaging(firebaseApp || getApps()[0]);
+      for (let i = 0; i < tokens.length; i += 500) {
+        const chunk = tokens.slice(i, i + 500);
+        const message = {
+          tokens: chunk,
+          notification: { title, body },
+          data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+        };
+        await messaging.sendEachForMulticast(message);
+      }
+      console.log(`[FCM Broadcast] Broadcasted "${title}" to ${tokens.length} devices.`);
+    } else {
+      console.log(`[FCM Broadcast] Staging broadcast: "${title}" to ${tokens.length} devices.`);
+    }
+    return { totalTokens: tokens.length, sent: tokens.length };
+  } catch (err) {
+    console.error('[FCM Broadcast] Error broadcasting push:', err);
+    return { error: err.message };
+  }
+}
+
 module.exports = {
   saveDeviceToken,
   removeDeviceToken,
   sendPushToUser,
+  broadcastPushNotification,
 };

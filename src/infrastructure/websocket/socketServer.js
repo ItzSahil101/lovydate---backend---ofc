@@ -116,11 +116,18 @@ function emitToConversation(conversationId, event, data) {
   }
 }
 
+function emitToAll(event, data) {
+  if (ioInstance) {
+    ioInstance.emit(event, data);
+  }
+}
+
 module.exports = {
   initSocketServer,
   getIO,
   emitToUser,
   emitToConversation,
+  emitToAll,
   isUserOnline,
 };
 
