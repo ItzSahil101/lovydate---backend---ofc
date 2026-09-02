@@ -53,7 +53,7 @@ async function deleteSegment(req, res, next) {
 
 async function estimateSegment(req, res, next) {
   try {
-    const result = await segmentsService.estimateSegment(req.body.filters);
+    const result = await segmentsService.estimateSegment(req.body.filters, req.body.audienceType);
     res.status(200).json({ data: result });
   } catch (err) {
     next(err);

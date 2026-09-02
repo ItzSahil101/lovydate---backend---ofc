@@ -78,6 +78,13 @@ initFirebase();
 async function saveDeviceToken(userId, deviceToken, platform = 'android') {
   if (!userId || !deviceToken) return;
   try {
+    // 1. Remove this device token from other users (e.g. previous logged-out account on same device)
+    await query(
+      `DELETE FROM user_devices WHERE device_token = $1 AND user_id != $2`,
+      [deviceToken, userId]
+    );
+
+    // 2. Upsert token for current user
     await query(
       `INSERT INTO user_devices (user_id, device_token, platform, updated_at)
        VALUES ($1, $2, $3, NOW())
@@ -103,12 +110,14 @@ async function removeDeviceToken(userId, deviceToken) {
 async function sendPushToUser(userId, { title, body, data = {} }) {
   try {
     const res = await query(
-      `SELECT device_token FROM user_devices WHERE user_id = $1`,
+      `SELECT DISTINCT device_token FROM user_devices WHERE user_id = $1 AND device_token IS NOT NULL`,
       [userId]
     );
     if (res.rows.length === 0) return;
 
-    const tokens = res.rows.map((r) => r.device_token);
+    // Deduplicate tokens
+    const tokens = [...new Set(res.rows.map((r) => r.device_token).filter(Boolean))];
+    if (tokens.length === 0) return;
 
     if (firebaseApp || getApps().length > 0) {
       const messaging = getMessaging(firebaseApp || getApps()[0]);
@@ -119,7 +128,7 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
           body,
         },
         data: Object.fromEntries(
-          Object.entries(data).map(([k, v]) => [k, String(v)])
+          Object.entries(data).map(([k, v]) => [k, String(v ?? '')])
         ),
       };
       const response = await messaging.sendEachForMulticast(message);
@@ -134,9 +143,13 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
 
 async function broadcastPushNotification({ title, body, data = {}, userIds = null }) {
   try {
-    let sql = `SELECT device_token FROM user_devices WHERE device_token IS NOT NULL`;
+    let sql = `SELECT DISTINCT device_token FROM user_devices WHERE device_token IS NOT NULL`;
     const params = [];
-    if (userIds && userIds.length > 0) {
+    if (userIds && Array.isArray(userIds)) {
+      if (userIds.length === 0) {
+        console.log(`[FCM Broadcast] Empty audience list for "${title}", skipped.`);
+        return { totalTokens: 0, sent: 0 };
+      }
       params.push(userIds);
       sql += ` AND user_id = ANY($1::uuid[])`;
     }
@@ -146,7 +159,9 @@ async function broadcastPushNotification({ title, body, data = {}, userIds = nul
       return { totalTokens: 0, sent: 0 };
     }
 
-    const tokens = res.rows.map((r) => r.device_token);
+    const tokens = [...new Set(res.rows.map((r) => r.device_token).filter(Boolean))];
+    if (tokens.length === 0) return { totalTokens: 0, sent: 0 };
+
     if (firebaseApp || getApps().length > 0) {
       const messaging = getMessaging(firebaseApp || getApps()[0]);
       for (let i = 0; i < tokens.length; i += 500) {
@@ -154,13 +169,13 @@ async function broadcastPushNotification({ title, body, data = {}, userIds = nul
         const message = {
           tokens: chunk,
           notification: { title, body },
-          data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+          data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v ?? '')])),
         };
         await messaging.sendEachForMulticast(message);
       }
-      console.log(`[FCM Broadcast] Broadcasted "${title}" to ${tokens.length} devices.`);
+      console.log(`[FCM Broadcast] Broadcasted "${title}" to ${tokens.length} distinct devices.`);
     } else {
-      console.log(`[FCM Broadcast] Staging broadcast: "${title}" to ${tokens.length} devices.`);
+      console.log(`[FCM Broadcast] Staging broadcast: "${title}" to ${tokens.length} distinct devices.`);
     }
     return { totalTokens: tokens.length, sent: tokens.length };
   } catch (err) {

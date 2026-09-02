@@ -140,6 +140,9 @@ async function sendMessage(conversationId, senderId, payload = {}) {
           type: 'chat',
           conversationId,
           senderId,
+          partnerId: senderId,
+          partnerName: details.displayName || 'Match',
+          partnerPhotoUrl: details.partnerPhotoUrl || '',
         },
       }).catch(() => {});
     }

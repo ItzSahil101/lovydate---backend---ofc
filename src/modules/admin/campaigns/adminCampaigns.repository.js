@@ -191,36 +191,55 @@ async function deleteCampaign(campaignId) {
   return res.rows[0] || null;
 }
 
-async function countAudience(audienceType, audienceFilters = {}) {
+function buildAudienceQuery(audienceType, audienceFilters = {}) {
   const conditions = ["u.status = 'active'"];
   const params = [];
 
-  if (audienceFilters.gender) {
-    params.push(audienceFilters.gender);
-    conditions.push(`p.gender = $${params.length}`);
-  }
+  // Only apply demographic / activity filters when targeting 'custom'
+  if (audienceType === 'custom' && audienceFilters) {
+    if (audienceFilters.gender && audienceFilters.gender.trim()) {
+      params.push(audienceFilters.gender.trim().toLowerCase());
+      conditions.push(`LOWER(p.gender) = $${params.length}`);
+    }
 
-  if (audienceFilters.minAge) {
-    params.push(parseInt(audienceFilters.minAge, 10));
-    conditions.push(`EXTRACT(YEAR FROM age(p.date_of_birth)) >= $${params.length}`);
-  }
+    if (audienceFilters.minAge && Number(audienceFilters.minAge) > 0) {
+      params.push(parseInt(audienceFilters.minAge, 10));
+      conditions.push(`EXTRACT(YEAR FROM age(CURRENT_DATE, p.date_of_birth)) >= $${params.length}`);
+    }
 
-  if (audienceFilters.maxAge) {
-    params.push(parseInt(audienceFilters.maxAge, 10));
-    conditions.push(`EXTRACT(YEAR FROM age(p.date_of_birth)) <= $${params.length}`);
-  }
+    if (audienceFilters.maxAge && Number(audienceFilters.maxAge) > 0) {
+      params.push(parseInt(audienceFilters.maxAge, 10));
+      conditions.push(`EXTRACT(YEAR FROM age(CURRENT_DATE, p.date_of_birth)) <= $${params.length}`);
+    }
 
-  if (audienceFilters.onboardingCompleted !== undefined && audienceFilters.onboardingCompleted !== null) {
-    params.push(Boolean(audienceFilters.onboardingCompleted));
-    conditions.push(`p.onboarding_completed = $${params.length}`);
-  }
+    if (audienceFilters.onboardingCompleted !== undefined && audienceFilters.onboardingCompleted !== null && audienceFilters.onboardingCompleted !== '') {
+      params.push(Boolean(audienceFilters.onboardingCompleted));
+      conditions.push(`p.onboarding_completed = $${params.length}`);
+    }
 
-  if (audienceFilters.activeWithinDays) {
-    params.push(parseInt(audienceFilters.activeWithinDays, 10));
-    conditions.push(`p.last_active_at >= NOW() - ($${params.length} || ' days')::interval`);
+    if (audienceFilters.activeWithinDays && Number(audienceFilters.activeWithinDays) > 0) {
+      params.push(parseInt(audienceFilters.activeWithinDays, 10));
+      conditions.push(`p.last_active_at >= NOW() - ($${params.length} || ' days')::interval`);
+    }
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { whereClause, params };
+}
+
+async function countAudience(audienceType = 'everyone', audienceFilters = {}, segmentId = null) {
+  let effectiveFilters = audienceFilters;
+  let effectiveType = audienceType;
+
+  if (audienceType === 'segment' && segmentId) {
+    const segRes = await query(`SELECT filters FROM admin_segments WHERE id = $1`, [segmentId]);
+    if (segRes.rows.length > 0) {
+      effectiveFilters = typeof segRes.rows[0].filters === 'string' ? JSON.parse(segRes.rows[0].filters) : segRes.rows[0].filters;
+      effectiveType = 'custom';
+    }
+  }
+
+  const { whereClause, params } = buildAudienceQuery(effectiveType, effectiveFilters);
   const sql = `
     SELECT COUNT(DISTINCT u.id) as count
     FROM users u
@@ -232,6 +251,30 @@ async function countAudience(audienceType, audienceFilters = {}) {
   return parseInt(res.rows[0]?.count || 0, 10);
 }
 
+async function getAudienceUserIds(audienceType = 'everyone', audienceFilters = {}, segmentId = null) {
+  let effectiveFilters = audienceFilters;
+  let effectiveType = audienceType;
+
+  if (audienceType === 'segment' && segmentId) {
+    const segRes = await query(`SELECT filters FROM admin_segments WHERE id = $1`, [segmentId]);
+    if (segRes.rows.length > 0) {
+      effectiveFilters = typeof segRes.rows[0].filters === 'string' ? JSON.parse(segRes.rows[0].filters) : segRes.rows[0].filters;
+      effectiveType = 'custom';
+    }
+  }
+
+  const { whereClause, params } = buildAudienceQuery(effectiveType, effectiveFilters);
+  const sql = `
+    SELECT DISTINCT u.id
+    FROM users u
+    LEFT JOIN profiles p ON u.id = p.user_id
+    ${whereClause}
+  `;
+
+  const res = await query(sql, params);
+  return res.rows.map((r) => r.id);
+}
+
 module.exports = {
   listCampaigns,
   getCampaignDetail,
@@ -239,4 +282,5 @@ module.exports = {
   updateCampaign,
   deleteCampaign,
   countAudience,
+  getAudienceUserIds,
 };

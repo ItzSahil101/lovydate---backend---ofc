@@ -61,9 +61,9 @@ async function deleteSegment(id, admin, ipAddress) {
   return { success: true };
 }
 
-async function estimateSegment(filters) {
-  const count = await campaignsRepo.countAudience('custom', filters || {});
-  return { estimatedCount: count };
+async function estimateSegment(filters, audienceType = 'custom') {
+  const count = await campaignsRepo.countAudience(audienceType, filters || {});
+  return { estimatedCount: count, estimatedAudience: count };
 }
 
 module.exports = {

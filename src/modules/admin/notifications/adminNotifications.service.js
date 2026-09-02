@@ -73,8 +73,63 @@ async function createTemplate({ name, title, body, destinationType, destinationD
   return res.rows[0];
 }
 
+async function updateTemplate({ id, name, title, body, destinationType, destinationData, admin, ipAddress }) {
+  if (!id) throw new BadRequestError('Template ID is required');
+  if (!name || !title || !body) throw new BadRequestError('Template name, title, and body are required');
+
+  const res = await query(
+    `UPDATE notification_templates
+     SET name = $1, title = $2, body = $3, destination_type = $4,
+         destination_data = $5, updated_at = NOW()
+     WHERE id = $6
+     RETURNING *`,
+    [name, title, body, destinationType || 'open_app', JSON.stringify(destinationData || {}), id]
+  );
+
+  if (res.rows.length === 0) {
+    throw new NotFoundError('Notification template not found');
+  }
+
+  await logAudit({
+    adminId: admin.id,
+    adminEmail: admin.email,
+    action: 'NOTIFICATION_TEMPLATE_UPDATED',
+    targetType: 'template',
+    targetId: id,
+    details: { name },
+    ipAddress,
+  });
+
+  return res.rows[0];
+}
+
+async function deleteTemplate({ id, admin, ipAddress }) {
+  if (!id) throw new BadRequestError('Template ID is required');
+
+  const existingRes = await query(`SELECT id, name FROM notification_templates WHERE id = $1`, [id]);
+  if (existingRes.rows.length === 0) {
+    throw new NotFoundError('Notification template not found');
+  }
+
+  await query(`DELETE FROM notification_templates WHERE id = $1`, [id]);
+
+  await logAudit({
+    adminId: admin.id,
+    adminEmail: admin.email,
+    action: 'NOTIFICATION_TEMPLATE_DELETED',
+    targetType: 'template',
+    targetId: id,
+    details: { name: existingRes.rows[0].name },
+    ipAddress,
+  });
+
+  return { success: true, id };
+}
+
 module.exports = {
   getNotificationStats,
   listTemplates,
   createTemplate,
+  updateTemplate,
+  deleteTemplate,
 };

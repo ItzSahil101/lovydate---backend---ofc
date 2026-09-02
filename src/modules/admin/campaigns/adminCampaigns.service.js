@@ -25,9 +25,14 @@ async function createCampaign(data, admin, ipAddress) {
   });
 
   if (campaign.status === 'SENT') {
+    const userIds = campaign.audienceType === 'everyone'
+      ? null
+      : await campaignsRepo.getAudienceUserIds(campaign.audienceType, campaign.audienceFilters, campaign.segmentId);
+
     broadcastPushNotification({
       title: campaign.title,
       body: campaign.body,
+      userIds,
       data: {
         type: 'campaign',
         campaignId: campaign.id,
@@ -147,10 +152,15 @@ async function sendCampaign({ campaignId, admin, ipAddress }) {
     deliveredCount: Math.floor(estimatedCount * 0.95),
   });
 
+  const userIds = campaign.audienceType === 'everyone'
+    ? null
+    : await campaignsRepo.getAudienceUserIds(campaign.audienceType, campaign.audienceFilters, campaign.segmentId);
+
   // Real-time Push & WebSocket Broadcast to audience
   broadcastPushNotification({
     title: campaign.title,
     body: campaign.body,
+    userIds,
     data: {
       type: 'campaign',
       campaignId: campaign.id,
