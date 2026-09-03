@@ -197,19 +197,32 @@ function buildAudienceQuery(audienceType, audienceFilters = {}) {
 
   // Only apply demographic / activity filters when targeting 'custom'
   if (audienceType === 'custom' && audienceFilters) {
-    if (audienceFilters.gender && audienceFilters.gender.trim()) {
-      params.push(audienceFilters.gender.trim().toLowerCase());
-      conditions.push(`LOWER(p.gender) = $${params.length}`);
+    if (audienceFilters.gender && typeof audienceFilters.gender === 'string' && audienceFilters.gender.trim()) {
+      const g = audienceFilters.gender.trim().toLowerCase();
+      if (g === 'male' || g === 'man' || g === 'men') {
+        conditions.push(`(LOWER(p.gender) IN ('male', 'man', 'men'))`);
+      } else if (g === 'female' || g === 'woman' || g === 'women') {
+        conditions.push(`(LOWER(p.gender) IN ('female', 'woman', 'women'))`);
+      } else if (g === 'non_binary' || g === 'non-binary' || g === 'nonbinary') {
+        conditions.push(`(
+          LOWER(COALESCE(p.gender, '')) NOT IN ('male', 'man', 'men', 'female', 'woman', 'women')
+          OR LOWER(COALESCE(p.gender, '')) LIKE '%non%binary%'
+          OR LOWER(COALESCE(p.custom_gender, '')) LIKE '%non%binary%'
+        )`);
+      } else {
+        params.push(g);
+        conditions.push(`(LOWER(p.gender) = $${params.length} OR LOWER(COALESCE(p.custom_gender, '')) = $${params.length})`);
+      }
     }
 
-    if (audienceFilters.minAge && Number(audienceFilters.minAge) > 0) {
+    if (audienceFilters.minAge && Number(audienceFilters.minAge) > 18) {
       params.push(parseInt(audienceFilters.minAge, 10));
-      conditions.push(`EXTRACT(YEAR FROM age(CURRENT_DATE, p.date_of_birth)) >= $${params.length}`);
+      conditions.push(`(p.date_of_birth IS NOT NULL AND EXTRACT(YEAR FROM age(CURRENT_DATE, p.date_of_birth)) >= $${params.length})`);
     }
 
-    if (audienceFilters.maxAge && Number(audienceFilters.maxAge) > 0) {
+    if (audienceFilters.maxAge && Number(audienceFilters.maxAge) > 0 && Number(audienceFilters.maxAge) < 70) {
       params.push(parseInt(audienceFilters.maxAge, 10));
-      conditions.push(`EXTRACT(YEAR FROM age(CURRENT_DATE, p.date_of_birth)) <= $${params.length}`);
+      conditions.push(`(p.date_of_birth IS NOT NULL AND EXTRACT(YEAR FROM age(CURRENT_DATE, p.date_of_birth)) <= $${params.length})`);
     }
 
     if (audienceFilters.onboardingCompleted !== undefined && audienceFilters.onboardingCompleted !== null && audienceFilters.onboardingCompleted !== '') {

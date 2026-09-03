@@ -28,8 +28,21 @@ async function listUsers({
   }
 
   if (gender) {
-    params.push(gender);
-    conditions.push(`p.gender = $${params.length}`);
+    const g = gender.trim().toLowerCase();
+    if (g === 'male' || g === 'man' || g === 'men') {
+      conditions.push(`(LOWER(p.gender) IN ('male', 'man', 'men'))`);
+    } else if (g === 'female' || g === 'woman' || g === 'women') {
+      conditions.push(`(LOWER(p.gender) IN ('female', 'woman', 'women'))`);
+    } else if (g === 'non_binary' || g === 'non-binary' || g === 'nonbinary') {
+      conditions.push(`(
+        LOWER(COALESCE(p.gender, '')) NOT IN ('male', 'man', 'men', 'female', 'woman', 'women')
+        OR LOWER(COALESCE(p.gender, '')) LIKE '%non%binary%'
+        OR LOWER(COALESCE(p.custom_gender, '')) LIKE '%non%binary%'
+      )`);
+    } else {
+      params.push(g);
+      conditions.push(`(LOWER(p.gender) = $${params.length} OR LOWER(COALESCE(p.custom_gender, '')) = $${params.length})`);
+    }
   }
 
   if (onboardingCompleted !== undefined && onboardingCompleted !== null && onboardingCompleted !== '') {

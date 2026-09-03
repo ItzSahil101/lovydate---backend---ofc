@@ -73,11 +73,33 @@ function initFirebase() {
   }
 }
 
-initFirebase();
+let tableEnsured = false;
+async function ensureUserDevicesTable() {
+  if (tableEnsured) return;
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_devices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        device_token TEXT NOT NULL,
+        platform VARCHAR(32) DEFAULT 'android',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (user_id, device_token)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_devices_device_token ON user_devices(device_token);
+    `);
+    tableEnsured = true;
+  } catch (err) {
+    // Non-fatal if table already exists or migrations handle it
+  }
+}
 
 async function saveDeviceToken(userId, deviceToken, platform = 'android') {
   if (!userId || !deviceToken) return;
   try {
+    await ensureUserDevicesTable();
     // 1. Remove this device token from other users (e.g. previous logged-out account on same device)
     await query(
       `DELETE FROM user_devices WHERE device_token = $1 AND user_id != $2`,
@@ -109,6 +131,7 @@ async function removeDeviceToken(userId, deviceToken) {
 
 async function sendPushToUser(userId, { title, body, data = {} }) {
   try {
+    await ensureUserDevicesTable();
     const res = await query(
       `SELECT DISTINCT device_token FROM user_devices WHERE user_id = $1 AND device_token IS NOT NULL`,
       [userId]
@@ -143,6 +166,7 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
 
 async function broadcastPushNotification({ title, body, data = {}, userIds = null }) {
   try {
+    await ensureUserDevicesTable();
     let sql = `SELECT DISTINCT device_token FROM user_devices WHERE device_token IS NOT NULL`;
     const params = [];
     if (userIds && Array.isArray(userIds)) {
