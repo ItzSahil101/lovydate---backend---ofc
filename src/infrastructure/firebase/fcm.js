@@ -128,6 +128,7 @@ async function saveDeviceToken(userId, deviceToken, platform = 'android') {
     );
   } catch (err) {
     console.error('Error saving device token:', err);
+    throw err;
   }
 }
 

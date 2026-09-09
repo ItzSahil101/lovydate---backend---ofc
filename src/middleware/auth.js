@@ -21,7 +21,36 @@ function touchUserActivity(userId) {
   }
 }
 
-function requireAuth(req, res, next) {
+async function authenticateAccessToken(token) {
+  let decoded;
+  try {
+    decoded = jwt.verify(token, env.jwt.secret);
+    if (
+      typeof decoded.userId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.userId) ||
+      decoded.purpose
+    ) {
+      throw new Error('Invalid access token scope');
+    }
+  } catch {
+    throw new UnauthorizedError('Invalid or expired authentication token');
+  }
+
+  // A signed token can outlive its account (for example, after a database reset).
+  // Check the database on each request; cached activity is not proof of identity.
+  const result = await query('SELECT id, email, status FROM users WHERE id = $1', [decoded.userId]);
+  const user = result.rows[0];
+  if (!user) {
+    throw new UnauthorizedError('Your session is no longer valid. Please sign in again.', 'SESSION_INVALID');
+  }
+  if (user.status !== 'active') {
+    throw new UnauthorizedError('User account is not active', 'ACCOUNT_INACTIVE');
+  }
+
+  return { userId: user.id, email: user.email };
+}
+
+async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return next(new UnauthorizedError('Authentication token is required'));
@@ -29,22 +58,15 @@ function requireAuth(req, res, next) {
 
   const token = authHeader.substring(7);
   try {
-    const decoded = jwt.verify(token, env.jwt.secret);
-    if (typeof decoded.userId !== 'string' || !decoded.userId || decoded.purpose) {
-      throw new Error('Invalid access token scope');
-    }
-    req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-    };
-    touchUserActivity(decoded.userId);
-    next();
-  } catch {
-    return next(new UnauthorizedError('Invalid or expired authentication token'));
+    req.user = await authenticateAccessToken(token);
+    touchUserActivity(req.user.userId);
+  } catch (err) {
+    return next(err);
   }
+  return next();
 }
 
-function optionalAuth(req, res, next) {
+async function optionalAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return next();
@@ -52,20 +74,13 @@ function optionalAuth(req, res, next) {
 
   const token = authHeader.substring(7);
   try {
-    const decoded = jwt.verify(token, env.jwt.secret);
-    if (typeof decoded.userId !== 'string' || !decoded.userId || decoded.purpose) {
-      throw new Error('Invalid access token scope');
-    }
-    req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-    };
-    touchUserActivity(decoded.userId);
-  } catch {
-    // Optional auth ignores invalid/expired token
+    req.user = await authenticateAccessToken(token);
+    touchUserActivity(req.user.userId);
+  } catch (err) {
+    // Invalid sessions are anonymous on public routes; database failures are not.
+    if (!(err instanceof UnauthorizedError)) return next(err);
   }
   return next();
 }
 
-module.exports = { requireAuth, optionalAuth, touchUserActivity };
-
+module.exports = { requireAuth, optionalAuth, touchUserActivity, authenticateAccessToken };

@@ -1,9 +1,10 @@
 const { Server } = require('socket.io');
-const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
 const redis = require('../redis/client');
 const { query } = require('../database/pool');
 const { CACHE_KEYS, CACHE_TTL } = require('../../config/constants');
+const { authenticateAccessToken } = require('../../middleware/auth');
+const { UnauthorizedError } = require('../../shared/errors');
 
 let ioInstance = null;
 const activeUserSockets = new Map();
@@ -23,19 +24,18 @@ function initSocketServer(httpServer) {
     pingInterval: 25000,
   });
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
     if (!token) {
       return next(new Error('AUTHENTICATION_REQUIRED'));
     }
 
     try {
-      const decoded = jwt.verify(token, env.jwt.secret);
-      if (typeof decoded.userId !== 'string' || !decoded.userId || decoded.purpose) throw new Error('Invalid scope');
-      socket.userId = decoded.userId;
-      next();
-    } catch {
-      next(new Error('INVALID_TOKEN'));
+      const user = await authenticateAccessToken(token);
+      socket.userId = user.userId;
+      return next();
+    } catch (err) {
+      return next(new Error(err instanceof UnauthorizedError ? 'INVALID_TOKEN' : 'AUTHENTICATION_UNAVAILABLE'));
     }
   });
 
