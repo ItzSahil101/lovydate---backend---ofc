@@ -32,7 +32,7 @@ describe('device token registration failures', () => {
       .mockRejectedValueOnce(databaseError);
 
     await expect(
-      fcm.saveDeviceToken('missing-user-id', 'device-token', 'android')
+      fcm.saveDeviceToken('078cfb2c-c62d-4097-99ae-98954bdb2d7d', 'device-token', 'android')
     ).rejects.toBe(databaseError);
 
     expect(query).toHaveBeenCalledTimes(3);
@@ -49,7 +49,7 @@ describe('device token registration failures', () => {
     }));
     const { registerDeviceToken } = require('../src/modules/notifications/notifications.controller');
     const req = {
-      user: { userId: 'missing-user-id' },
+      user: { userId: '078cfb2c-c62d-4097-99ae-98954bdb2d7d' },
       body: { deviceToken: 'device-token', platform: 'android' },
     };
     const res = {
@@ -60,7 +60,7 @@ describe('device token registration failures', () => {
 
     await registerDeviceToken(req, res, next);
 
-    expect(saveDeviceToken).toHaveBeenCalledWith('missing-user-id', 'device-token', 'android');
+    expect(saveDeviceToken).toHaveBeenCalledWith('078cfb2c-c62d-4097-99ae-98954bdb2d7d', 'device-token', 'android');
     expect(next).toHaveBeenCalledWith(databaseError);
     expect(res.status).not.toHaveBeenCalled();
     expect(res.json).not.toHaveBeenCalled();

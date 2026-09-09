@@ -1,8 +1,16 @@
+const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { s3Client } = require('../../infrastructure/s3/client');
 const env = require('../../config/env');
+
+const uploadsDir = path.join(__dirname, '../../../../uploads');
+if (!fs.existsSync(uploadsDir)) {
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  } catch (_) {}
+}
 
 function getPublicUrl(key) {
   if (env.media && env.media.publicUrl) {
@@ -81,14 +89,20 @@ async function uploadFileToS3(file) {
   const ext = path.extname(file.originalname || '').toLowerCase() || '.jpg';
   const key = `${uuidv4()}${ext}`;
 
-  const command = new PutObjectCommand({
-    Bucket: env.s3.bucket,
-    Key: key,
-    Body: file.buffer,
-    ContentType: file.mimetype || 'image/jpeg',
-  });
+  try {
+    const command = new PutObjectCommand({
+      Bucket: env.s3.bucket,
+      Key: key,
+      Body: file.buffer,
+      ContentType: file.mimetype || 'image/jpeg',
+    });
 
-  await s3Client.send(command);
+    await s3Client.send(command);
+  } catch (s3Error) {
+    console.warn(`[MediaService] S3 upload failed for ${key}, falling back to local storage:`, s3Error.message);
+    const localFilePath = path.join(uploadsDir, key);
+    fs.writeFileSync(localFilePath, file.buffer);
+  }
 
   return {
     key,
