@@ -37,8 +37,16 @@ function initWorkers(services = {}) {
   const notificationsWorker = new Worker(
     QUEUE_NAMES.NOTIFICATIONS,
     async (job) => {
+      if (job.name === 'campaign-send') {
+        const { sendCampaign } = require('../../modules/admin/campaigns/adminCampaigns.service');
+        return sendCampaign({ ...job.data, scheduled: true });
+      }
       const { userId, type, payload } = job.data;
-      console.log(`[NOTIFICATION JOB] type=${type} targetUser=${userId} payload=${JSON.stringify(payload)}`);
+      if (!userId || !payload?.title || !payload?.body) throw new Error('Invalid notification job');
+      const { broadcastPushNotification } = require('../firebase/fcm');
+      const result = await broadcastPushNotification({ ...payload, userIds: [userId], data: { ...payload.data, type } });
+      if (result.error || result.unavailable || result.failed > 0) throw new Error('Push delivery failed');
+      return result;
     },
     {
       connection: redis,

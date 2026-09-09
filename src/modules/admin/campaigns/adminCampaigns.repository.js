@@ -80,8 +80,7 @@ async function createCampaign({
   audienceCount = 0,
   adminId,
 }) {
-  const finalStatus = status || (scheduledAt ? 'SCHEDULED' : 'DRAFT');
-  const isSent = finalStatus === 'SENT';
+  const finalStatus = 'DRAFT';
 
   const res = await query(
     `INSERT INTO notification_campaigns (
@@ -101,11 +100,11 @@ async function createCampaign({
       JSON.stringify(audienceFilters || {}),
       segmentId || null,
       finalStatus,
-      scheduledAt || null,
-      isSent ? new Date() : null,
-      audienceCount || 0,
-      isSent ? audienceCount || 0 : 0,
-      isSent ? Math.floor((audienceCount || 0) * 0.95) : 0,
+      null,
+      null,
+      0,
+      0,
+      0,
       0,
       0,
       adminId,
@@ -173,6 +172,10 @@ async function updateCampaign(campaignId, fields) {
   if (fields.deliveredCount !== undefined) {
     params.push(fields.deliveredCount);
     updates.push(`delivered_count = $${params.length}`);
+  }
+  if (fields.failedCount !== undefined) {
+    params.push(fields.failedCount);
+    updates.push(`failed_count = $${params.length}`);
   }
 
   const sql = `

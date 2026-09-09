@@ -18,6 +18,10 @@ const refreshSchema = Joi.object({
   refreshToken: Joi.string().required(),
 });
 
+const googleAuthSchema = Joi.object({
+  idToken: Joi.string().trim().min(100).required(),
+});
+
 const forgotPasswordRequestSchema = Joi.object({
   email: Joi.string().email().required().messages({
     'string.email': 'Please enter a valid email address',
@@ -40,4 +44,5 @@ module.exports = {
   refreshSchema,
   forgotPasswordRequestSchema,
   forgotPasswordResetSchema,
+  googleAuthSchema,
 };

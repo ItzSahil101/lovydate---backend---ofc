@@ -9,6 +9,7 @@ const {
   refreshSchema,
   forgotPasswordRequestSchema,
   forgotPasswordResetSchema,
+  googleAuthSchema,
 } = require('./auth.validation');
 
 router.post(
@@ -48,6 +49,8 @@ router.post(
 
 router.post(
   '/google',
+  rateLimiter({ action: 'google-auth', max: 10, windowSeconds: 60 }),
+  validate(googleAuthSchema),
   authController.googleAuth
 );
 

@@ -1,5 +1,28 @@
 const { query } = require('../../infrastructure/database/pool');
-const { BadRequestError, NotFoundError, ForbiddenError } = require('../../shared/errors');
+const jwt = require('jsonwebtoken');
+const env = require('../../config/env');
+const { BadRequestError, NotFoundError, ForbiddenError, UnauthorizedError } = require('../../shared/errors');
+
+function createTicketAccessToken(ticketId) {
+  return jwt.sign(
+    { ticketId, purpose: 'support-ticket' },
+    env.jwt.secret,
+    { expiresIn: '30d' }
+  );
+}
+
+function requireTicketAccess(ticketId, accessToken) {
+  if (!accessToken) {
+    throw new UnauthorizedError('Support ticket access token is required', 'SUPPORT_TOKEN_REQUIRED');
+  }
+  try {
+    const payload = jwt.verify(accessToken, env.jwt.secret);
+    if (payload.purpose !== 'support-ticket' || payload.ticketId !== ticketId) throw new Error('scope');
+    return payload;
+  } catch (err) {
+    throw new UnauthorizedError('Invalid or expired support ticket access token', 'INVALID_SUPPORT_TOKEN');
+  }
+}
 
 async function checkUserRestriction(userId, email) {
   if (!userId && !email) return null;
@@ -53,10 +76,12 @@ async function createPublicTicket({ name, email, subject, category, message, att
   return {
     ...newCase,
     initialMessage: msgRes.rows[0],
+    accessToken: createTicketAccessToken(newCase.id),
   };
 }
 
-async function getPublicTicket(ticketId) {
+async function getPublicTicket(ticketId, accessToken) {
+  requireTicketAccess(ticketId, accessToken);
   const caseRes = await query(
     `SELECT sc.id, sc.subject, sc.category, sc.priority, sc.status,
             sc.customer_name AS "customerName", sc.customer_email AS "customerEmail",
@@ -101,7 +126,8 @@ async function getPublicTicket(ticketId) {
   };
 }
 
-async function sendCustomerMessage(ticketId, { name, message, attachments = [] }) {
+async function sendCustomerMessage(ticketId, { name, message, attachments = [] }, accessToken) {
+  requireTicketAccess(ticketId, accessToken);
   if (!message?.trim() && (!attachments || attachments.length === 0)) {
     throw new BadRequestError('Message or attachment is required');
   }
@@ -132,8 +158,11 @@ async function sendCustomerMessage(ticketId, { name, message, attachments = [] }
   return msgRes.rows[0];
 }
 
-async function getTicketsByEmail(email) {
+async function getTicketsByEmail(email, user) {
   if (!email) return [];
+  if (!user?.email || user.email.toLowerCase() !== email.toLowerCase().trim()) {
+    throw new ForbiddenError('You may only view support tickets for your own account', 'SUPPORT_EMAIL_FORBIDDEN');
+  }
   const res = await query(
     `SELECT sc.id, sc.subject, sc.category, sc.status, sc.created_at AS "createdAt",
             (SELECT message FROM support_messages WHERE case_id = sc.id ORDER BY created_at DESC LIMIT 1) AS "lastMessage",

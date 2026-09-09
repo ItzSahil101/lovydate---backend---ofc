@@ -31,6 +31,27 @@ async function createUser({ email, passwordHash = null, verified = false }) {
   return userRes.rows[0];
 }
 
+async function createGoogleUser({ email, googleId }) {
+  const normalizedEmail = email.toLowerCase().trim();
+  const userRes = await query(
+    `INSERT INTO users (email, google_id, email_verified_at, status)
+     VALUES ($1, $2, NOW(), 'active')
+     RETURNING id, email, google_id, status, created_at`,
+    [normalizedEmail, googleId]
+  );
+  return userRes.rows[0];
+}
+
+async function linkGoogleIdentity(userId, googleId) {
+  const result = await query(
+    `UPDATE users SET google_id = $2, email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW()
+     WHERE id = $1 AND (google_id IS NULL OR google_id = $2)
+     RETURNING id, email, google_id, status, created_at`,
+    [userId, googleId]
+  );
+  return result.rows[0] || null;
+}
+
 async function markEmailVerified(userId) {
   await query(
     `UPDATE users
@@ -79,6 +100,8 @@ module.exports = {
   findUserByEmail,
   findUserById,
   createUser,
+  createGoogleUser,
+  linkGoogleIdentity,
   markEmailVerified,
   updatePassword,
   storeRefreshToken,

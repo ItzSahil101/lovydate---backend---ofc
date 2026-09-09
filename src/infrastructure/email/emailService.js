@@ -7,7 +7,9 @@ function getTransporter() {
 
   const host = process.env.SMTP_HOST || 'smtp.hostinger.com';
   const port = parseInt(process.env.SMTP_PORT || '465', 10);
-  const secure = port === 465;
+  const secure = process.env.SMTP_SECURE
+    ? process.env.SMTP_SECURE === 'true'
+    : port === 465;
   const user = process.env.SMTP_USER || '';
   const pass = process.env.SMTP_PASS || '';
 
@@ -16,17 +18,16 @@ function getTransporter() {
     port,
     secure,
     auth: user && pass ? { user, pass } : undefined,
-    tls: {
-      rejectUnauthorized: false,
-    },
   });
 
   return transporter;
 }
 
 async function sendOtpEmail(toEmail, otpCode) {
-  const fromUser = process.env.SMTP_USER || 'verification@rylixhacks.xyz';
-  const from = `"LovyDate Verification" <${fromUser}>`;
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS || !from) {
+    throw new Error('SMTP is not configured');
+  }
   const transport = getTransporter();
 
   const html = `
@@ -88,11 +89,10 @@ async function sendOtpEmail(toEmail, otpCode) {
       text: `Your LovyDate verification code is: ${otpCode}. It expires in 10 minutes.`,
       html,
     });
-    console.log(`[EMAIL DISPATCH] Sent OTP to ${toEmail} -> Message ID: ${info.messageId}`);
     return { success: true, messageId: info.messageId };
   } catch (err) {
     console.error(`[EMAIL ERROR] Failed to send to ${toEmail}:`, err.message);
-    return { success: false, error: err.message };
+    throw err;
   }
 }
 

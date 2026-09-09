@@ -8,7 +8,28 @@ const { addJob } = require('../../infrastructure/queue/queueManager');
 const { QUEUE_NAMES } = require('../../config/constants');
 const authRepo = require('./auth.repository');
 const emailService = require('../../infrastructure/email/emailService');
-const { BadRequestError, UnauthorizedError } = require('../../shared/errors');
+const { AppError, BadRequestError, UnauthorizedError } = require('../../shared/errors');
+const { verifyFirebaseIdToken } = require('../../infrastructure/firebase/fcm');
+
+function createOtp() {
+  return crypto.randomInt(100000, 1000000).toString();
+}
+
+async function storeOtp(key, codeHash) {
+  try {
+    await redis.set(key, codeHash, 'EX', CACHE_TTL.OTP_SECONDS);
+  } catch (err) {
+    throw new AppError('Verification service is temporarily unavailable', 503, 'VERIFICATION_UNAVAILABLE');
+  }
+}
+
+async function readOtp(key) {
+  try {
+    return await redis.get(key);
+  } catch (err) {
+    throw new AppError('Verification service is temporarily unavailable', 503, 'VERIFICATION_UNAVAILABLE');
+  }
+}
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -45,6 +66,9 @@ async function requestCode(email, password = null) {
     if (!isPasswordValid) {
       throw new BadRequestError('Invalid email or password', 'INVALID_CREDENTIALS');
     }
+    if (existingUser.status !== 'active') {
+      throw new UnauthorizedError('User account is not active', 'ACCOUNT_INACTIVE');
+    }
 
     const tokens = generateTokens(existingUser);
     await authRepo.storeRefreshToken(existingUser.id, tokens.tokenHash, tokens.expiresAt);
@@ -63,43 +87,29 @@ async function requestCode(email, password = null) {
     };
   }
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const code = createOtp();
   const codeHash = await bcrypt.hash(code, 10);
-
+  const otpKey = CACHE_KEYS.OTP(normalizedEmail);
+  await storeOtp(otpKey, codeHash);
   try {
-    await redis.set(
-      CACHE_KEYS.OTP(normalizedEmail),
-      codeHash,
-      'EX',
-      CACHE_TTL.OTP_SECONDS
-    );
-  } catch (err) {}
-
-  await emailService.sendOtpEmail(normalizedEmail, code);
+    await emailService.sendOtpEmail(normalizedEmail, code);
+  } catch (err) {
+    await redis.del(otpKey).catch(() => {});
+    throw new AppError('Verification email could not be sent', 503, 'EMAIL_DELIVERY_FAILED');
+  }
 
   return {
     requiresOtp: true,
     isNewUser: !existingUser,
     sent: true,
     expiresInSeconds: CACHE_TTL.OTP_SECONDS,
-    code: process.env.NODE_ENV !== 'production' ? code : undefined,
   };
 }
 
 async function verifyCode(email, code, password = null) {
   const normalizedEmail = email.trim().toLowerCase();
-  let storedHash = null;
-
-  try {
-    storedHash = await redis.get(CACHE_KEYS.OTP(normalizedEmail));
-  } catch {}
-
-  let isValid = false;
-  if (storedHash) {
-    isValid = await bcrypt.compare(code, storedHash);
-  } else if (process.env.NODE_ENV !== 'production' && code === '123456') {
-    isValid = true;
-  }
+  const storedHash = await readOtp(CACHE_KEYS.OTP(normalizedEmail));
+  const isValid = storedHash ? await bcrypt.compare(code, storedHash) : false;
 
   if (!isValid) {
     throw new BadRequestError('Invalid or expired verification code', 'INVALID_OTP');
@@ -124,6 +134,9 @@ async function verifyCode(email, code, password = null) {
     });
     isNewUser = true;
   } else {
+    if (user.status !== 'active') {
+      throw new UnauthorizedError('User account is not active', 'ACCOUNT_INACTIVE');
+    }
     if (!user.email_verified_at) {
       await authRepo.markEmailVerified(user.id);
     }
@@ -157,41 +170,27 @@ async function requestPasswordReset(email) {
     throw new BadRequestError('No account found with this email address', 'USER_NOT_FOUND');
   }
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const code = createOtp();
   const codeHash = await bcrypt.hash(code, 10);
-
+  const otpKey = `pwd_otp:${normalizedEmail}`;
+  await storeOtp(otpKey, codeHash);
   try {
-    await redis.set(
-      `pwd_otp:${normalizedEmail}`,
-      codeHash,
-      'EX',
-      CACHE_TTL.OTP_SECONDS
-    );
-  } catch (err) {}
-
-  await emailService.sendOtpEmail(normalizedEmail, code);
+    await emailService.sendOtpEmail(normalizedEmail, code);
+  } catch (err) {
+    await redis.del(otpKey).catch(() => {});
+    throw new AppError('Verification email could not be sent', 503, 'EMAIL_DELIVERY_FAILED');
+  }
 
   return {
     sent: true,
     expiresInSeconds: CACHE_TTL.OTP_SECONDS,
-    code: process.env.NODE_ENV !== 'production' ? code : undefined,
   };
 }
 
 async function resetPasswordAndLogin(email, code, newPassword) {
   const normalizedEmail = email.trim().toLowerCase();
-  let storedHash = null;
-
-  try {
-    storedHash = await redis.get(`pwd_otp:${normalizedEmail}`);
-  } catch {}
-
-  let isValid = false;
-  if (storedHash) {
-    isValid = await bcrypt.compare(code, storedHash);
-  } else if (process.env.NODE_ENV !== 'production' && code === '123456') {
-    isValid = true;
-  }
+  const storedHash = await readOtp(`pwd_otp:${normalizedEmail}`);
+  const isValid = storedHash ? await bcrypt.compare(code, storedHash) : false;
 
   if (!isValid) {
     throw new BadRequestError('Invalid or expired verification code', 'INVALID_OTP');
@@ -204,6 +203,9 @@ async function resetPasswordAndLogin(email, code, newPassword) {
   const user = await authRepo.findUserByEmail(normalizedEmail);
   if (!user) {
     throw new BadRequestError('No account found with this email address', 'USER_NOT_FOUND');
+  }
+  if (user.status !== 'active') {
+    throw new UnauthorizedError('User account is not active', 'ACCOUNT_INACTIVE');
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
@@ -265,14 +267,30 @@ async function logout(rawRefreshToken, userId) {
   return { loggedOut: true };
 }
 
-async function googleAuth(googleUser = {}) {
-  const email = (googleUser.email || 'google_user@lovydate.com').trim().toLowerCase();
+async function googleAuth(idToken) {
+  let googleUser;
+  try {
+    googleUser = await verifyFirebaseIdToken(idToken);
+  } catch (err) {
+    throw new UnauthorizedError('Invalid Google identity token', 'INVALID_GOOGLE_TOKEN');
+  }
+  if (!googleUser.email || googleUser.email_verified === false) {
+    throw new UnauthorizedError('Google account email is not verified', 'UNVERIFIED_GOOGLE_EMAIL');
+  }
+  const email = googleUser.email.trim().toLowerCase();
   let user = await authRepo.findUserByEmail(email);
   let isNewUser = false;
 
   if (!user) {
-    user = await authRepo.createUserWithEmail(email);
+    user = await authRepo.createGoogleUser({ email, googleId: googleUser.uid });
     isNewUser = true;
+  } else if (!user.google_id) {
+    user = await authRepo.linkGoogleIdentity(user.id, googleUser.uid);
+  } else if (user.google_id !== googleUser.uid) {
+    throw new UnauthorizedError('Google identity does not match this account', 'GOOGLE_IDENTITY_MISMATCH');
+  }
+  if (user.status !== 'active') {
+    throw new UnauthorizedError('User account is not active', 'ACCOUNT_INACTIVE');
   }
 
   const tokens = generateTokens(user);
@@ -285,7 +303,7 @@ async function googleAuth(googleUser = {}) {
     user: {
       id: user.id,
       email: user.email,
-      name: googleUser.name || 'Google User',
+      name: googleUser.name || null,
     },
   };
 }

@@ -30,6 +30,9 @@ function requireAuth(req, res, next) {
   const token = authHeader.substring(7);
   try {
     const decoded = jwt.verify(token, env.jwt.secret);
+    if (typeof decoded.userId !== 'string' || !decoded.userId || decoded.purpose) {
+      throw new Error('Invalid access token scope');
+    }
     req.user = {
       userId: decoded.userId,
       email: decoded.email,
@@ -50,6 +53,9 @@ function optionalAuth(req, res, next) {
   const token = authHeader.substring(7);
   try {
     const decoded = jwt.verify(token, env.jwt.secret);
+    if (typeof decoded.userId !== 'string' || !decoded.userId || decoded.purpose) {
+      throw new Error('Invalid access token scope');
+    }
     req.user = {
       userId: decoded.userId,
       email: decoded.email,
@@ -62,5 +68,4 @@ function optionalAuth(req, res, next) {
 }
 
 module.exports = { requireAuth, optionalAuth, touchUserActivity };
-
 

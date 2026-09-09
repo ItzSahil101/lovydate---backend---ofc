@@ -31,6 +31,7 @@ function initSocketServer(httpServer) {
 
     try {
       const decoded = jwt.verify(token, env.jwt.secret);
+      if (typeof decoded.userId !== 'string' || !decoded.userId || decoded.purpose) throw new Error('Invalid scope');
       socket.userId = decoded.userId;
       next();
     } catch {
@@ -51,20 +52,26 @@ function initSocketServer(httpServer) {
       await redis.set(CACHE_KEYS.PRESENCE(userId), 'online', 'EX', CACHE_TTL.PRESENCE_SECONDS);
     } catch {}
 
-    socket.on('join:conversation', (conversationId) => {
-      if (conversationId) {
-        socket.join(`conv:${conversationId}`);
-      }
+    socket.on('join:conversation', async (conversationId) => {
+      if (typeof conversationId !== 'string' || !/^[0-9a-f-]{36}$/i.test(conversationId)) return;
+      try {
+        const membership = await query(
+          'SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2',
+          [conversationId, userId]
+        );
+        if (membership.rows.length > 0 && socket.connected) socket.join(`conv:${conversationId}`);
+      } catch { socket.emit('conversation:error', { message: 'Unable to join conversation' }); }
     });
 
     socket.on('leave:conversation', (conversationId) => {
-      if (conversationId) {
+      if (typeof conversationId === 'string') {
         socket.leave(`conv:${conversationId}`);
       }
     });
 
-    socket.on('typing:start', ({ conversationId }) => {
-      if (conversationId) {
+    socket.on('typing:start', (payload) => {
+      const conversationId = payload?.conversationId;
+      if (typeof conversationId === 'string' && socket.rooms.has(`conv:${conversationId}`)) {
         socket.to(`conv:${conversationId}`).emit('typing:start', {
           conversationId,
           userId,
@@ -72,8 +79,9 @@ function initSocketServer(httpServer) {
       }
     });
 
-    socket.on('typing:stop', ({ conversationId }) => {
-      if (conversationId) {
+    socket.on('typing:stop', (payload) => {
+      const conversationId = payload?.conversationId;
+      if (typeof conversationId === 'string' && socket.rooms.has(`conv:${conversationId}`)) {
         socket.to(`conv:${conversationId}`).emit('typing:stop', {
           conversationId,
           userId,
@@ -91,7 +99,7 @@ function initSocketServer(httpServer) {
 
       query('UPDATE profiles SET last_active_at = NOW() WHERE user_id = $1', [userId]).catch(() => {});
       try {
-        await redis.del(CACHE_KEYS.PRESENCE(userId));
+        if (!activeUserSockets.has(userId)) await redis.del(CACHE_KEYS.PRESENCE(userId));
       } catch {}
     });
   });
@@ -130,4 +138,3 @@ module.exports = {
   emitToAll,
   isUserOnline,
 };
-

@@ -1,101 +1,43 @@
-const { query } = require('../../../infrastructure/database/pool');
+const { getQueue } = require('../../../infrastructure/queue/queueManager');
+const { QUEUE_NAMES } = require('../../../config/constants');
 const { logAudit } = require('../audit/adminAudit.service');
+const { NotFoundError, BadRequestError } = require('../../../shared/errors');
 
-async function listQueues() {
-  const [notifRes, reportRes, supportRes, userRes] = await Promise.all([
-    query(`SELECT COALESCE(SUM(sent_count), 0)::int as sent, COALESCE(SUM(failed_count), 0)::int as failed FROM notification_campaigns`),
-    query(`SELECT COUNT(*) FILTER (WHERE status = 'RESOLVED')::int as resolved, COUNT(*) FILTER (WHERE status = 'PENDING')::int as pending FROM reports`),
-    query(`SELECT COUNT(*) FILTER (WHERE status = 'resolved')::int as resolved, COUNT(*) FILTER (WHERE status = 'open')::int as open FROM support_cases`),
-    query(`SELECT COUNT(*)::int as count FROM users`),
+const queueNames = Object.values(QUEUE_NAMES);
+function resolveQueue(name) {
+  if (!queueNames.includes(name)) throw new NotFoundError('Queue not found');
+  return getQueue(name);
+}
+async function queueSnapshot(name) {
+  const queue = resolveQueue(name);
+  const [counts, workers] = await Promise.all([
+    queue.getJobCounts('wait', 'active', 'completed', 'failed', 'delayed'),
+    queue.getWorkers(),
   ]);
-
-  const notif = notifRes.rows[0] || {};
-  const report = reportRes.rows[0] || {};
-  const support = supportRes.rows[0] || {};
-  const user = userRes.rows[0] || {};
-
-  return [
-    {
-      name: 'notifications',
-      title: 'Push Notification Dispatcher',
-      waiting: 0,
-      active: 0,
-      completed: notif.sent || 0,
-      failed: notif.failed || 0,
-      delayed: 0,
-    },
-    {
-      name: 'discovery_indexer',
-      title: 'Discovery Candidate Indexer',
-      waiting: 0,
-      active: 1,
-      completed: user.count || 0,
-      failed: 0,
-      delayed: 0,
-    },
-    {
-      name: 'moderation_scanner',
-      title: 'Safety & Content Scanner',
-      waiting: report.pending || 0,
-      active: 0,
-      completed: report.resolved || 0,
-      failed: 0,
-      delayed: 0,
-    },
-    {
-      name: 'support_sync',
-      title: 'Support Ticket Delivery Queue',
-      waiting: support.open || 0,
-      active: 0,
-      completed: support.resolved || 0,
-      failed: 0,
-      delayed: 0,
-    },
-  ];
+  return { name, waiting: counts.wait ?? 0, active: counts.active ?? 0, completed: counts.completed ?? 0, failed: counts.failed ?? 0, delayed: counts.delayed ?? 0, activeWorkers: workers.length };
 }
-
+async function listQueues() {
+  return Promise.all(queueNames.map(queueSnapshot));
+}
 async function getQueueDetails(queueName) {
-  const queues = await listQueues();
-  const queue = queues.find((q) => q.name === queueName);
-  if (!queue) return null;
-
-  return {
-    ...queue,
-    failedJobs: [],
-  };
+  const queue = resolveQueue(queueName);
+  const [snapshot, failedJobs] = await Promise.all([queueSnapshot(queueName), queue.getFailed(0, 49)]);
+  return { ...snapshot, failedJobs: failedJobs.map(job => ({ id: job.id, name: job.name, failedReason: job.failedReason, attemptsMade: job.attemptsMade, timestamp: job.timestamp })) };
 }
-
-async function retryJob(queueName, jobId, admin, ipAddress) {
+async function performJobAction(action, queueName, jobId, admin, ipAddress) {
+  const queue = resolveQueue(queueName);
+  const job = await queue.getJob(jobId);
+  if (!job) throw new NotFoundError('Job not found');
+  const state = await job.getState();
+  if (state !== 'failed') throw new BadRequestError('Only failed jobs can be retried or removed');
+  if (action === 'retry') await job.retry();
+  else await job.remove();
   await logAudit({
-    adminId: admin.id,
-    adminEmail: admin.email,
-    action: 'JOB_RETRIED',
-    targetType: 'queue_job',
-    targetId: jobId,
-    details: { queueName },
-    ipAddress,
+    adminId: admin.id, adminEmail: admin.email, action: action === 'retry' ? 'JOB_RETRIED' : 'JOB_REMOVED',
+    targetType: 'queue_job', targetId: jobId, details: { queueName }, ipAddress,
   });
-
-  return { success: true, message: `Job ${jobId} queued for retry` };
+  return { success: true, message: action === 'retry' ? 'Job queued for retry' : 'Failed job removed' };
 }
-
-async function removeJob(queueName, jobId, admin, ipAddress) {
-  await logAudit({
-    adminId: admin.id,
-    adminEmail: admin.email,
-    action: 'JOB_REMOVED',
-    targetType: 'queue_job',
-    targetId: jobId,
-    details: { queueName },
-    ipAddress,
-  });
-
-  return { success: true, message: `Job ${jobId} removed from failed set` };
-}
-
-module.exports = {
-  listQueues,
-  getQueueDetails,
-  retryJob,
-  removeJob,
-};
+const retryJob = (...args) => performJobAction('retry', ...args);
+const removeJob = (...args) => performJobAction('remove', ...args);
+module.exports = { listQueues, getQueueDetails, retryJob, removeJob };

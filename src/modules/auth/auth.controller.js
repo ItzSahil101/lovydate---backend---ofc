@@ -61,7 +61,7 @@ async function logout(req, res, next) {
 
 async function googleAuth(req, res, next) {
   try {
-    const result = await authService.googleAuth(req.body);
+    const result = await authService.googleAuth(req.body.idToken);
     return success(res, result);
   } catch (err) {
     next(err);

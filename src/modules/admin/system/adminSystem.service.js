@@ -1,70 +1,58 @@
+const { performance } = require('node:perf_hooks');
 const { pool } = require('../../../infrastructure/database/pool');
 const redis = require('../../../infrastructure/redis/client');
+const { getIO } = require('../../../infrastructure/websocket/socketServer');
+const { listQueues } = require('../jobs/adminJobs.service');
 
+async function measure(check) {
+  const start = performance.now();
+  try {
+    await check();
+    return { status: 'healthy', latencyMs: Math.round((performance.now() - start) * 100) / 100 };
+  } catch { return { status: 'down', latencyMs: null }; }
+}
 async function getSystemHealth() {
-  let dbOk = false;
-  let dbLatency = 0;
-  let redisOk = false;
-  let redisLatency = 0;
-
-  try {
-    const t0 = Date.now();
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
-    dbLatency = Date.now() - t0;
-    dbOk = true;
-  } catch {}
-
-  try {
-    const t0 = Date.now();
-    const ping = await redis.ping();
-    redisLatency = Date.now() - t0;
-    redisOk = ping === 'PONG';
-  } catch {}
-
+  const [postgres, redisStatus, queuesResult] = await Promise.all([
+    measure(() => pool.query('SELECT 1')),
+    measure(async () => { if (await redis.ping() !== 'PONG') throw new Error(); }),
+    listQueues().then(queues => ({ queues })).catch(() => ({ queues: null })),
+  ]);
+  const io = getIO();
+  const workers = queuesResult.queues?.reduce((total, queue) => total + queue.activeWorkers, 0);
+  const services = {
+    api: { status: 'healthy' },
+    postgres,
+    redis: redisStatus,
+    websocket: { status: io ? 'healthy' : 'unavailable', activeConnections: io?.engine?.clientsCount ?? null },
+    bullmq: { status: !queuesResult.queues ? 'down' : queuesResult.queues.every(queue => queue.activeWorkers > 0) ? 'healthy' : 'degraded', activeWorkers: workers ?? null },
+  };
   return {
-    status: dbOk && redisOk ? 'healthy' : 'degraded',
-    uptime: Math.floor(process.uptime()),
-    timestamp: new Date().toISOString(),
-    services: {
-      api: { status: 'healthy', latencyMs: 1 },
-      postgres: { status: dbOk ? 'healthy' : 'down', latencyMs: dbLatency },
-      redis: { status: redisOk ? 'healthy' : 'down', latencyMs: redisLatency },
-      websocket: { status: 'healthy', activeConnections: 0 },
-      bullmq: { status: 'healthy', activeWorkers: 1 },
-    },
+    status: Object.values(services).every(service => service.status === 'healthy') ? 'healthy' : 'degraded',
+    uptime: Math.floor(process.uptime()), timestamp: new Date().toISOString(), services,
   };
 }
-
 async function getSystemMetrics() {
-  const mem = process.memoryUsage();
-
+  const memory = process.memoryUsage();
+  const started = performance.now();
+  await new Promise(resolve => setImmediate(resolve));
+  const eventLoopLagMs = Math.round((performance.now() - started) * 100) / 100;
+  const [redisStatus, queues] = await Promise.all([
+    measure(async () => { if (await redis.ping() !== 'PONG') throw new Error(); }),
+    listQueues().catch(() => null),
+  ]);
+  const queuesSummary = queues ? queues.reduce((total, queue) => {
+    for (const key of ['waiting', 'active', 'completed', 'failed']) total[key] += queue[key];
+    return total;
+  }, { waiting: 0, active: 0, completed: 0, failed: 0 }) : null;
   return {
-    apiRequestsPerMin: 0,
-    p50LatencyMs: 8,
-    p95LatencyMs: 24,
-    p99LatencyMs: 65,
-    errorRatePercentage: 0.0,
-    eventLoopLagMs: 0.8,
-    dbPoolActive: pool.totalCount - pool.idleCount || 1,
-    dbPoolIdle: pool.idleCount || 9,
-    dbPoolWaiting: pool.waitingCount || 0,
-    redisLatencyMs: 1.0,
-    redisCacheHitRate: '98.5%',
-    memoryHeapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
-    memoryRssMb: Math.round(mem.rss / 1024 / 1024),
-    websocketConnections: 0,
-    queuesSummary: {
-      waiting: 0,
-      active: 0,
-      completed: 0,
-      failed: 0,
-    },
+    apiRequestsPerMin: null, p50LatencyMs: null, p95LatencyMs: null, p99LatencyMs: null,
+    errorRatePercentage: null, redisCacheHitRate: null,
+    eventLoopLagMs, dbPoolActive: pool.totalCount - pool.idleCount,
+    dbPoolIdle: pool.idleCount, dbPoolWaiting: pool.waitingCount,
+    redisLatencyMs: redisStatus.latencyMs,
+    memoryHeapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+    memoryRssMb: Math.round(memory.rss / 1024 / 1024),
+    websocketConnections: getIO()?.engine?.clientsCount ?? null, queuesSummary,
   };
 }
-
-module.exports = {
-  getSystemHealth,
-  getSystemMetrics,
-};
+module.exports = { getSystemHealth, getSystemMetrics };

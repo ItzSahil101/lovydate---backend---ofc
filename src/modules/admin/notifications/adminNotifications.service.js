@@ -1,6 +1,6 @@
 const { query } = require('../../../infrastructure/database/pool');
 const { logAudit } = require('../audit/adminAudit.service');
-const { BadRequestError } = require('../../../shared/errors');
+const { BadRequestError, NotFoundError } = require('../../../shared/errors');
 
 async function getNotificationStats() {
   const [statusTodayRes, recentSendsRes, templatesRes] = await Promise.all([

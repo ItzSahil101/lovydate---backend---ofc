@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
+const { getAuth } = require('firebase-admin/auth');
 const { query } = require('../database/pool');
 
 let firebaseApp = null;
@@ -67,10 +68,22 @@ function initFirebase() {
       return;
     }
 
-    console.log('ℹ️ Firebase Admin SDK: No credentials in environment yet, push notifications will operate in staging mode.');
+    console.warn('Firebase Admin SDK is unavailable because credentials are not configured.');
   } catch (err) {
     console.warn('⚠️ Firebase Admin SDK initialization error:', err.message);
   }
+}
+
+function requireFirebaseApp() {
+  initFirebase();
+  if (!firebaseApp && getApps().length === 0) {
+    throw new Error('Firebase credentials are not configured');
+  }
+  return firebaseApp || getApps()[0];
+}
+
+async function verifyFirebaseIdToken(idToken) {
+  return getAuth(requireFirebaseApp()).verifyIdToken(idToken, true);
 }
 
 let tableEnsured = false;
@@ -142,6 +155,7 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
     const tokens = [...new Set(res.rows.map((r) => r.device_token).filter(Boolean))];
     if (tokens.length === 0) return;
 
+    initFirebase();
     if (firebaseApp || getApps().length > 0) {
       const messaging = getMessaging(firebaseApp || getApps()[0]);
       const message = {
@@ -156,8 +170,6 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
       };
       const response = await messaging.sendEachForMulticast(message);
       console.log(`[FCM] Sent push notification to ${userId}: ${response.successCount} success, ${response.failureCount} failed`);
-    } else {
-      console.log(`[FCM Mock] Push notification for ${userId}: "${title}" - "${body}" (Tokens: ${tokens.length})`);
     }
   } catch (err) {
     console.warn(`[FCM] Push send error for user ${userId}:`, err.message);
@@ -165,6 +177,9 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
 }
 
 async function broadcastPushNotification({ title, body, data = {}, userIds = null }) {
+  let sent = 0;
+  let failed = 0;
+  let totalTokens = 0;
   try {
     await ensureUserDevicesTable();
     let sql = `SELECT DISTINCT device_token FROM user_devices WHERE device_token IS NOT NULL`;
@@ -185,7 +200,9 @@ async function broadcastPushNotification({ title, body, data = {}, userIds = nul
 
     const tokens = [...new Set(res.rows.map((r) => r.device_token).filter(Boolean))];
     if (tokens.length === 0) return { totalTokens: 0, sent: 0 };
+    totalTokens = tokens.length;
 
+    initFirebase();
     if (firebaseApp || getApps().length > 0) {
       const messaging = getMessaging(firebaseApp || getApps()[0]);
       for (let i = 0; i < tokens.length; i += 500) {
@@ -195,16 +212,17 @@ async function broadcastPushNotification({ title, body, data = {}, userIds = nul
           notification: { title, body },
           data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v ?? '')])),
         };
-        await messaging.sendEachForMulticast(message);
+        const result = await messaging.sendEachForMulticast(message);
+        sent += result.successCount;
+        failed += result.failureCount;
       }
       console.log(`[FCM Broadcast] Broadcasted "${title}" to ${tokens.length} distinct devices.`);
-    } else {
-      console.log(`[FCM Broadcast] Staging broadcast: "${title}" to ${tokens.length} distinct devices.`);
+      return { totalTokens, sent, failed };
     }
-    return { totalTokens: tokens.length, sent: tokens.length };
+    return { totalTokens, sent: 0, failed: totalTokens, unavailable: true };
   } catch (err) {
     console.error('[FCM Broadcast] Error broadcasting push:', err);
-    return { error: err.message };
+    return { totalTokens, sent, failed: Math.max(failed, totalTokens - sent), error: 'Push delivery failed' };
   }
 }
 
@@ -213,4 +231,5 @@ module.exports = {
   removeDeviceToken,
   sendPushToUser,
   broadcastPushNotification,
+  verifyFirebaseIdToken,
 };

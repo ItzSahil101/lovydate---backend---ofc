@@ -44,9 +44,7 @@ app.get('/health/ready', async (req, res) => {
   let redisOk = false;
 
   try {
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
+    await pool.query('SELECT 1');
     dbOk = true;
   } catch {}
 
