@@ -32,6 +32,24 @@ router.post(
   chatController.sendMessage
 );
 
+router.put(
+  '/:id/messages/:messageId/reaction',
+  rateLimiter({ action: 'message-react', max: 120, windowSeconds: 60 }),
+  chatController.reactToMessage
+);
+
+router.delete(
+  '/:id/messages/:messageId/unsend',
+  rateLimiter({ action: 'message-unsend', max: 60, windowSeconds: 60 }),
+  chatController.unsendMessage
+);
+
+router.delete(
+  '/:id/messages/:messageId',
+  rateLimiter({ action: 'message-delete-for-me', max: 120, windowSeconds: 60 }),
+  chatController.deleteMessageForMe
+);
+
 router.post(
   '/:id/read',
   rateLimiter({ action: 'message-read', max: 120, windowSeconds: 60 }),

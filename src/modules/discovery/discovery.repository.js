@@ -3,19 +3,19 @@ const { query } = require('../../infrastructure/database/pool');
 async function getUserPreferencesAndLocation(userId) {
   const res = await query(
     `SELECT
-       up.interested_in AS "interestedIn",
-       up.min_age AS "minAge",
-       up.max_age AS "maxAge",
-       up.max_distance_meters AS "maxDistanceMeters",
-       up.allow_outside_preferences AS "allowOutsidePreferences",
+       COALESCE(up.interested_in, ARRAY['Everyone']::text[]) AS "interestedIn",
+       COALESCE(up.min_age, 18) AS "minAge",
+       COALESCE(up.max_age, 60) AS "maxAge",
+       COALESCE(up.max_distance_meters, 50000) AS "maxDistanceMeters",
+       COALESCE(up.allow_outside_preferences, TRUE) AS "allowOutsidePreferences",
        p.gender AS "userGender",
        EXTRACT(YEAR FROM AGE(p.date_of_birth))::int AS "userAge",
        ul.latitude,
        ul.longitude
-     FROM user_preferences up
-     JOIN profiles p ON p.user_id = up.user_id
-     LEFT JOIN user_locations ul ON ul.user_id = up.user_id
-     WHERE up.user_id = $1`,
+     FROM profiles p
+     LEFT JOIN user_preferences up ON up.user_id = p.user_id
+     LEFT JOIN user_locations ul ON ul.user_id = p.user_id
+     WHERE p.user_id = $1`,
     [userId]
   );
   return res.rows[0] || null;
@@ -59,11 +59,11 @@ async function findCandidateUserIds(userId, prefs, limit = 100) {
     const maxDistKm = prefs.maxDistanceMeters / 1000.0;
     geoClause = `AND ul.latitude IS NOT NULL
                  AND (
-                   6371 * acos(
+                   6371 * acos(LEAST(1.0, GREATEST(-1.0,
                      cos(radians($${idx++})) * cos(radians(ul.latitude)) *
                      cos(radians(ul.longitude) - radians($${idx++})) +
                      sin(radians($${idx++})) * sin(radians(ul.latitude))
-                   )
+                   )))
                  ) <= $${idx++}`;
     values.push(prefs.latitude, prefs.longitude, prefs.latitude, maxDistKm);
   }

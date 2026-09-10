@@ -44,6 +44,7 @@ async function listMessages(conversationId, userId, limit = 50, cursor = null) {
 
   const { items, hasMore } = await chatRepo.getMessages(
     conversationId,
+    userId,
     clampedLimit,
     decoded
   );
@@ -99,6 +100,17 @@ async function sendMessage(conversationId, senderId, payload = {}) {
     throw new ForbiddenError('You are not a member of this conversation');
   }
 
+  const replyToMessageId = payload.replyToMessageId || null;
+  if (replyToMessageId !== null) {
+    if (!isUuid(replyToMessageId)) {
+      throw new BadRequestError('A valid reply message is required', 'INVALID_REPLY_MESSAGE_ID');
+    }
+    const replyTarget = await chatRepo.getMessage(conversationId, replyToMessageId, senderId);
+    if (!replyTarget || replyTarget.isUnsent) {
+      throw new BadRequestError('The reply message is not in this conversation', 'INVALID_REPLY_MESSAGE');
+    }
+  }
+
   const message = await chatRepo.insertMessage(
     conversationId,
     senderId,
@@ -109,6 +121,7 @@ async function sendMessage(conversationId, senderId, payload = {}) {
       mimeType: type === 'text' ? null : payload.mimeType,
       sizeBytes: type === 'text' ? null : Number(payload.sizeBytes || 0) || null,
       durationSeconds: type === 'text' ? null : durationSeconds || null,
+      replyToMessageId,
     }
   );
 
@@ -123,6 +136,9 @@ async function sendMessage(conversationId, senderId, payload = {}) {
     sizeBytes: message.sizeBytes,
     durationSeconds: message.durationSeconds,
     createdAt: message.createdAt,
+    replyTo: message.replyTo,
+    reactions: message.reactions,
+    isUnsent: message.isUnsent,
   });
 
   try {
@@ -151,6 +167,65 @@ async function sendMessage(conversationId, senderId, payload = {}) {
   return message;
 }
 
+const ALLOWED_REACTIONS = new Set(['\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F44D}', '\u{1F525}']);
+
+async function reactToMessage(conversationId, messageId, userId, payload = {}) {
+  validateConversationId(conversationId);
+  if (!isUuid(messageId)) {
+    throw new BadRequestError('A valid message is required', 'INVALID_MESSAGE_ID');
+  }
+  if (!(await chatRepo.isConversationMember(conversationId, userId))) {
+    throw new ForbiddenError('You are not a member of this conversation');
+  }
+  const message = await chatRepo.getMessage(conversationId, messageId, userId);
+  if (!message) throw new NotFoundError('Message not found');
+  if (message.isUnsent) {
+    throw new BadRequestError('An unsent message cannot be reacted to', 'MESSAGE_UNSENT');
+  }
+  const emoji = typeof payload.emoji === 'string' ? payload.emoji.trim() : '';
+  if (!emoji) {
+    await chatRepo.removeReaction(messageId, userId);
+    const updated = await chatRepo.getMessage(conversationId, messageId, userId);
+    emitToConversation(conversationId, 'message:updated', updated);
+    return updated;
+  }
+  if (!ALLOWED_REACTIONS.has(emoji)) {
+    throw new BadRequestError('Unsupported reaction', 'INVALID_REACTION');
+  }
+  const updated = await chatRepo.setReaction(conversationId, messageId, userId, emoji);
+  emitToConversation(conversationId, 'message:updated', updated);
+  return updated;
+}
+
+async function deleteMessageForMe(conversationId, messageId, userId) {
+  validateConversationId(conversationId);
+  if (!isUuid(messageId)) throw new BadRequestError('A valid message is required', 'INVALID_MESSAGE_ID');
+  if (!(await chatRepo.isConversationMember(conversationId, userId))) {
+    throw new ForbiddenError('You are not a member of this conversation');
+  }
+  if (!(await chatRepo.getMessage(conversationId, messageId, userId))) {
+    throw new NotFoundError('Message not found');
+  }
+  await chatRepo.deleteMessageForUser(conversationId, messageId, userId);
+  return { deleted: true };
+}
+
+async function unsendMessage(conversationId, messageId, userId) {
+  validateConversationId(conversationId);
+  if (!isUuid(messageId)) throw new BadRequestError('A valid message is required', 'INVALID_MESSAGE_ID');
+  if (!(await chatRepo.isConversationMember(conversationId, userId))) {
+    throw new ForbiddenError('You are not a member of this conversation');
+  }
+  const existing = await chatRepo.getMessage(conversationId, messageId, userId);
+  if (!existing) throw new NotFoundError('Message not found');
+  if (existing.senderId !== userId) {
+    throw new ForbiddenError('Only the sender can unsend this message', 'MESSAGE_NOT_OWNED');
+  }
+  const updated = await chatRepo.unsendMessage(conversationId, messageId, userId);
+  emitToConversation(conversationId, 'message:updated', updated);
+  return updated;
+}
+
 async function markRead(conversationId, userId, lastMessageId) {
   validateConversationId(conversationId);
   if (!isUuid(lastMessageId)) {
@@ -161,6 +236,9 @@ async function markRead(conversationId, userId, lastMessageId) {
     throw new ForbiddenError('You are not a member of this conversation');
   }
 
+  if (!(await chatRepo.getMessage(conversationId, lastMessageId, userId))) {
+    throw new NotFoundError('Message not found in this conversation');
+  }
   await chatRepo.markConversationRead(conversationId, userId, lastMessageId);
 
   emitToConversation(conversationId, 'message:read', {
@@ -177,5 +255,8 @@ module.exports = {
   getConversation,
   listMessages,
   sendMessage,
+  reactToMessage,
+  deleteMessageForMe,
+  unsendMessage,
   markRead,
 };

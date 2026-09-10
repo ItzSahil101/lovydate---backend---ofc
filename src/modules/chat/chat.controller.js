@@ -63,10 +63,40 @@ async function markRead(req, res, next) {
   }
 }
 
+async function reactToMessage(req, res, next) {
+  try {
+    const message = await chatService.reactToMessage(
+      req.params.id, req.params.messageId, req.user.userId, req.body
+    );
+    return success(res, message);
+  } catch (err) { next(err); }
+}
+
+async function deleteMessageForMe(req, res, next) {
+  try {
+    const result = await chatService.deleteMessageForMe(
+      req.params.id, req.params.messageId, req.user.userId
+    );
+    return success(res, result);
+  } catch (err) { next(err); }
+}
+
+async function unsendMessage(req, res, next) {
+  try {
+    const message = await chatService.unsendMessage(
+      req.params.id, req.params.messageId, req.user.userId
+    );
+    return success(res, message);
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getConversations,
   getConversationDetails,
   getMessages,
   sendMessage,
   markRead,
+  reactToMessage,
+  deleteMessageForMe,
+  unsendMessage,
 };

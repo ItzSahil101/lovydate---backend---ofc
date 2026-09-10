@@ -69,7 +69,7 @@ async function getDiscoveryFeed(userId, limit = DISCOVERY.DEFAULT_PAGE_SIZE, cur
     profileMap[p.userId] = p;
   });
 
-  const orderedProfiles = candidateIds
+  const orderedProfiles = pagedIds
     .map((id) => profileMap[id])
     .filter(Boolean)
     .map((p) => ({
@@ -95,8 +95,8 @@ async function getDiscoveryFeed(userId, limit = DISCOVERY.DEFAULT_PAGE_SIZE, cur
     return 0;
   });
 
-  const nextOffset = offset + orderedProfiles.length;
-  const hasMore = orderedProfiles.length >= clampedLimit;
+  const nextOffset = offset + pagedIds.length;
+  const hasMore = offset + pagedIds.length < candidateIds.length;
   const nextCursor = hasMore ? encodeCursor({ offset: nextOffset }) : null;
 
   return {

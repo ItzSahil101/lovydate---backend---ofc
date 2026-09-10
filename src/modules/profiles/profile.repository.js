@@ -154,6 +154,11 @@ async function getProfilesBatch(userIds, viewerUserId = null) {
        p.gender,
        p.relationship_goal AS "relationshipGoal",
        p.bio,
+       p.occupation,
+       p.height_cm AS "heightCm",
+       p.smoking,
+       p.drinking,
+       p.pets,
        ul.city,
        (u.email_verified_at IS NOT NULL) AS "isVerified",
         CASE

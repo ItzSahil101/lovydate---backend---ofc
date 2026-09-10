@@ -14,7 +14,8 @@
     "clean:all": "node scripts/clean_all.js",
     "reset": "node scripts/clean_all.js",
     "seed": "node src/infrastructure/database/seed_profiles.js",
-    "create:admin": "node scripts/create_admin.js"
+    "create:admin": "node scripts/create_admin.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1123.0",
@@ -36,6 +37,7 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "nodemon": "^3.1.9"
   }
 }
