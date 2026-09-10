@@ -338,6 +338,7 @@ async function addModerationNote(entityType, entityId, note, adminId) {
 
 async function deleteUserRefreshTokens(userId) {
   await query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [userId]);
+  await query(`UPDATE users SET auth_revoked_at = NOW(), updated_at = NOW() WHERE id = $1`, [userId]);
 }
 
 module.exports = {

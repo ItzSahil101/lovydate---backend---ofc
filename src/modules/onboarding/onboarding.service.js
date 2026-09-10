@@ -53,7 +53,7 @@ async function reverseGeocodeCoords(latitude, longitude) {
       }
     }
   } catch (_) {}
-  return { city: null, countryCode: 'US' };
+  return { city: null, countryCode: null };
 }
 
 async function saveLocation(userId, { latitude, longitude, city, countryCode }) {
@@ -73,11 +73,16 @@ async function saveLocation(userId, { latitude, longitude, city, countryCode }) 
     }
   }
 
+  const inferredCountryCode = finalCountryCode ||
+      (latitude >= 26.3 && latitude <= 30.5 && longitude >= 80.0 && longitude <= 88.3
+        ? 'NP'
+        : null);
+
   return onboardingRepo.updateUserLocation(userId, {
     latitude,
     longitude,
     city: finalCity,
-    countryCode: finalCountryCode || 'US',
+    countryCode: inferredCountryCode,
   });
 }
 

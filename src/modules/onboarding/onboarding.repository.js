@@ -31,7 +31,7 @@ async function updateProgress(userId, step, patchData) {
   return res.rows[0];
 }
 
-async function updateUserLocation(userId, { latitude, longitude, city = null, countryCode = 'US' }) {
+async function updateUserLocation(userId, { latitude, longitude, city = null, countryCode = null }) {
   await query(
     `INSERT INTO user_locations (user_id, latitude, longitude, city, country_code, updated_at)
      VALUES ($1, $2, $3, $4, $5, NOW())
@@ -125,7 +125,7 @@ async function completeOnboarding(userId, data) {
           data.location.latitude,
           data.location.longitude,
           data.location.city || null,
-          data.location.countryCode || 'US',
+          data.location.countryCode || null,
         ]
       );
     }

@@ -38,13 +38,19 @@ async function authenticateAccessToken(token) {
 
   // A signed token can outlive its account (for example, after a database reset).
   // Check the database on each request; cached activity is not proof of identity.
-  const result = await query('SELECT id, email, status FROM users WHERE id = $1', [decoded.userId]);
+  const result = await query(
+    'SELECT id, email, status, auth_revoked_at FROM users WHERE id = $1',
+    [decoded.userId]
+  );
   const user = result.rows[0];
   if (!user) {
     throw new UnauthorizedError('Your session is no longer valid. Please sign in again.', 'SESSION_INVALID');
   }
   if (user.status !== 'active') {
     throw new UnauthorizedError('User account is not active', 'ACCOUNT_INACTIVE');
+  }
+  if (user.auth_revoked_at && (!decoded.iat || decoded.iat * 1000 <= new Date(user.auth_revoked_at).getTime())) {
+    throw new UnauthorizedError('Your session was revoked. Please sign in again.', 'SESSION_REVOKED');
   }
 
   return { userId: user.id, email: user.email };
