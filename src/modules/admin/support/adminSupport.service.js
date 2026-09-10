@@ -1,6 +1,7 @@
 const supportRepo = require('./adminSupport.repository');
 const { logAudit } = require('../audit/adminAudit.service');
 const { NotFoundError, BadRequestError } = require('../../../shared/errors');
+const { emitToSupportAdmins, emitToSupportCase } = require('../../../infrastructure/websocket/socketServer');
 
 async function listCases(params, admin) {
   let assignedAdminId = params.assignedAdminId;
@@ -54,6 +55,8 @@ async function replyToCase(caseId, message, attachments, admin, ipAddress) {
   );
 
   await supportRepo.updateCase(caseId, { status: 'waiting' });
+  emitToSupportAdmins('support:message', { caseId, message: msg });
+  emitToSupportCase(caseId, 'support:message', { caseId, message: msg });
 
   await logAudit({
     adminId: admin.id,
@@ -82,6 +85,8 @@ async function assignCase(caseId, assignedAdminId, admin, ipAddress) {
     ipAddress,
   });
 
+  emitToSupportAdmins('support:updated', { caseId, ticket: updated });
+  emitToSupportCase(caseId, 'support:updated', { caseId, ticket: updated });
   return updated;
 }
 
@@ -113,6 +118,9 @@ async function resolveCase(caseId, resolutionSummary, admin, ipAddress) {
     resolutionSummary: resolutionSummary.trim(),
   });
 
+  emitToSupportAdmins('support:updated', { caseId, ticket: updated });
+  emitToSupportCase(caseId, 'support:updated', { caseId, ticket: updated });
+
   await logAudit({
     adminId: admin.id,
     adminEmail: admin.email,
@@ -140,6 +148,8 @@ async function updateCase(caseId, data, admin, ipAddress) {
     ipAddress,
   });
 
+  emitToSupportAdmins('support:updated', { caseId, ticket: updated });
+  emitToSupportCase(caseId, 'support:updated', { caseId, ticket: updated });
   return updated;
 }
 

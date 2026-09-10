@@ -1,4 +1,5 @@
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
 const redis = require('../redis/client');
 const { query } = require('../database/pool');
@@ -8,6 +9,31 @@ const { UnauthorizedError } = require('../../shared/errors');
 
 let ioInstance = null;
 const activeUserSockets = new Map();
+
+async function authenticateAdminSocket(token) {
+  const decoded = jwt.verify(token, env.jwt.secret);
+  if (!decoded.adminId || decoded.type !== 'admin_access') {
+    throw new UnauthorizedError('Invalid admin token');
+  }
+  const result = await query(
+    `SELECT a.id, a.status,
+            COALESCE(array_agg(DISTINCT rp.permission_id) FILTER (WHERE rp.permission_id IS NOT NULL), '{}') AS permissions
+     FROM admin_users a
+     LEFT JOIN admin_user_roles ur ON ur.admin_id = a.id
+     LEFT JOIN admin_role_permissions rp ON rp.role_id = ur.role_id
+     WHERE a.id = $1
+     GROUP BY a.id, a.status`,
+    [decoded.adminId]
+  );
+  const admin = result.rows[0];
+  if (!admin || String(admin.status).toLowerCase() !== 'active') {
+    throw new UnauthorizedError('Admin account is unavailable');
+  }
+  return {
+    id: admin.id,
+    permissions: new Set(admin.permissions || []),
+  };
+}
 
 function isUserOnline(userId) {
   if (!userId) return false;
@@ -31,8 +57,16 @@ function initSocketServer(httpServer) {
     }
 
     try {
-      const user = await authenticateAccessToken(token);
-      socket.userId = user.userId;
+      const decoded = jwt.decode(token);
+      if (decoded?.type === 'admin_access') {
+        const admin = await authenticateAdminSocket(token);
+        socket.adminId = admin.id;
+        socket.isAdmin = true;
+        socket.adminPermissions = admin.permissions;
+      } else {
+        const user = await authenticateAccessToken(token);
+        socket.userId = user.userId;
+      }
       return next();
     } catch (err) {
       return next(new Error(err instanceof UnauthorizedError ? 'INVALID_TOKEN' : 'AUTHENTICATION_UNAVAILABLE'));
@@ -40,6 +74,19 @@ function initSocketServer(httpServer) {
   });
 
   io.on('connection', async (socket) => {
+    if (socket.isAdmin) {
+      if (socket.adminPermissions.has('support.read')) socket.join('admin:support');
+      socket.on('join:support-case', (caseId) => {
+        if (socket.adminPermissions.has('support.read') && typeof caseId === 'string') {
+          socket.join(`support:${caseId}`);
+        }
+      });
+      socket.on('leave:support-case', (caseId) => {
+        if (typeof caseId === 'string') socket.leave(`support:${caseId}`);
+      });
+      return;
+    }
+
     const userId = socket.userId;
     socket.join(`user:${userId}`);
 
@@ -130,11 +177,21 @@ function emitToAll(event, data) {
   }
 }
 
+function emitToSupportAdmins(event, data) {
+  if (ioInstance) ioInstance.to('admin:support').emit(event, data);
+}
+
+function emitToSupportCase(caseId, event, data) {
+  if (ioInstance) ioInstance.to(`support:${caseId}`).emit(event, data);
+}
+
 module.exports = {
   initSocketServer,
   getIO,
   emitToUser,
   emitToConversation,
   emitToAll,
+  emitToSupportAdmins,
+  emitToSupportCase,
   isUserOnline,
 };

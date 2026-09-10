@@ -2,6 +2,7 @@ const { query } = require('../../infrastructure/database/pool');
 const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
 const { BadRequestError, NotFoundError, ForbiddenError, UnauthorizedError } = require('../../shared/errors');
+const { emitToSupportAdmins, emitToSupportCase } = require('../../infrastructure/websocket/socketServer');
 
 function createTicketAccessToken(ticketId) {
   return jwt.sign(
@@ -73,11 +74,13 @@ async function createPublicTicket({ name, email, subject, category, message, att
     [newCase.id, userId, name.trim(), (message || '').trim(), JSON.stringify(attachments || [])]
   );
 
-  return {
+  const result = {
     ...newCase,
     initialMessage: msgRes.rows[0],
     accessToken: createTicketAccessToken(newCase.id),
   };
+  emitToSupportAdmins('support:ticket:new', { ticket: newCase });
+  return result;
 }
 
 async function getPublicTicket(ticketId, accessToken) {
@@ -155,7 +158,10 @@ async function sendCustomerMessage(ticketId, { name, message, attachments = [] }
     [ticketId, name || 'Customer', (message || '').trim(), JSON.stringify(attachments || [])]
   );
 
-  return msgRes.rows[0];
+  const messageResult = msgRes.rows[0];
+  emitToSupportAdmins('support:message', { caseId: ticketId, message: messageResult });
+  emitToSupportCase(ticketId, 'support:message', { caseId: ticketId, message: messageResult });
+  return messageResult;
 }
 
 async function getTicketsByEmail(email, user) {
