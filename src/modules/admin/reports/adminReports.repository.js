@@ -108,14 +108,14 @@ async function getReportDetail(reportId) {
               COALESCE(array_agg(ph.url) FILTER (WHERE ph.url IS NOT NULL), '{}') AS photos
        FROM posts p
        LEFT JOIN post_photos ph ON p.id = ph.post_id
-       WHERE p.id = $1
+      WHERE p.id = $1::uuid
        GROUP BY p.id, p.content, p.created_at`,
       [report.targetId]
     );
     contextData = { type: 'post', data: postRes.rows[0] || null };
   } else if (report.targetType === 'comment' && report.targetId) {
     const comRes = await query(
-      `SELECT id, comment_text AS "commentText", created_at AS "createdAt" FROM post_comments WHERE id = $1`,
+      `SELECT id, comment_text AS "commentText", created_at AS "createdAt" FROM post_comments WHERE id = $1::uuid`,
       [report.targetId]
     );
     contextData = { type: 'comment', data: comRes.rows[0] || null };

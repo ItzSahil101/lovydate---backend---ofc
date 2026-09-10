@@ -265,17 +265,12 @@ async function deletePost(userId, postId) {
 
 async function reportPost(userId, postId, reason = 'Inappropriate content') {
   await query(
-    `CREATE TABLE IF NOT EXISTS post_reports (
-       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-       user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-       post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
-       reason TEXT,
-       created_at TIMESTAMPTZ DEFAULT NOW()
-     )`
-  );
-  await query(
-    `INSERT INTO post_reports (user_id, post_id, reason, created_at)
-     VALUES ($1, $2, $3, NOW())`,
+    `INSERT INTO reports (
+       reporter_user_id, reported_user_id, reason, category, target_type, target_id
+     )
+     SELECT $1, p.user_id, $3, 'Inappropriate Content', 'post', p.id::text
+     FROM posts p
+     WHERE p.id = $2`,
     [userId, postId, reason]
   );
   return { reported: true };
