@@ -1,16 +1,9 @@
-const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { s3Client } = require('../../infrastructure/s3/client');
 const env = require('../../config/env');
-
-const uploadsDir = path.join(__dirname, '../../../../uploads');
-if (!fs.existsSync(uploadsDir)) {
-  try {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  } catch (_) {}
-}
+const { AppError } = require('../../shared/errors');
 
 function getPublicUrl(key) {
   if (env.media && env.media.publicUrl) {
@@ -70,6 +63,13 @@ function readMp4DurationSeconds(buffer) {
 }
 
 async function getFileFromS3(key) {
+  if (!env.s3.configured) {
+    throw new AppError(
+      'Media storage is not configured.',
+      503,
+      'MEDIA_STORAGE_UNAVAILABLE'
+    );
+  }
   const command = new GetObjectCommand({
     Bucket: env.s3.bucket,
     Key: key,
@@ -89,6 +89,14 @@ async function uploadFileToS3(file) {
   const ext = path.extname(file.originalname || '').toLowerCase() || '.jpg';
   const key = `${uuidv4()}${ext}`;
 
+  if (!env.s3.configured) {
+    throw new AppError(
+      'Media storage is not configured.',
+      503,
+      'MEDIA_STORAGE_UNAVAILABLE'
+    );
+  }
+
   try {
     const command = new PutObjectCommand({
       Bucket: env.s3.bucket,
@@ -99,9 +107,12 @@ async function uploadFileToS3(file) {
 
     await s3Client.send(command);
   } catch (s3Error) {
-    console.warn(`[MediaService] S3 upload failed for ${key}, falling back to local storage:`, s3Error.message);
-    const localFilePath = path.join(uploadsDir, key);
-    fs.writeFileSync(localFilePath, file.buffer);
+    console.error(`[MediaService] S3 upload failed for ${key}:`, s3Error.message);
+    throw new AppError(
+      'Media storage is temporarily unavailable. Please try the upload again.',
+      503,
+      'MEDIA_STORAGE_UNAVAILABLE'
+    );
   }
 
   return {
@@ -119,4 +130,5 @@ module.exports = {
   getMediaKind,
   isManagedMediaUrl,
   readMp4DurationSeconds,
+  isS3Configured: () => env.s3.configured,
 };

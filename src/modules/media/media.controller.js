@@ -1,5 +1,3 @@
-const path = require('path');
-const fs = require('fs');
 const {
   uploadFileToS3,
   getFileFromS3,
@@ -7,7 +5,7 @@ const {
   readMp4DurationSeconds,
 } = require('./media.service');
 const { success } = require('../../shared/response');
-const { BadRequestError } = require('../../shared/errors');
+const { AppError, BadRequestError } = require('../../shared/errors');
 
 async function getMediaFile(req, res, next) {
   try {
@@ -33,13 +31,16 @@ async function getMediaFile(req, res, next) {
 
       return stream.pipe(res);
     } catch (s3Err) {
-      const localPath = path.join(__dirname, '../../../../uploads', key);
-      if (fs.existsSync(localPath)) {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-        return res.sendFile(localPath);
+      if (s3Err.name === 'NoSuchKey' || s3Err.name === 'NotFound' || s3Err.$metadata?.httpStatusCode === 404) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Media not found' } });
       }
-      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Media not found' } });
+      if (s3Err instanceof AppError) throw s3Err;
+      console.error(`[MediaController] Could not read ${key} from S3:`, s3Err.message);
+      throw new AppError(
+        'Media storage is temporarily unavailable. Please try again.',
+        503,
+        'MEDIA_STORAGE_UNAVAILABLE'
+      );
     }
   } catch (err) {
     next(err);

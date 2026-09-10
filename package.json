@@ -14,9 +14,6 @@
     "clean:all": "node scripts/clean_all.js",
     "reset": "node scripts/clean_all.js",
     "seed": "node src/infrastructure/database/seed_profiles.js",
-    "test": "jest --runInBand",
-    "test:e2e": "jest tests/*.test.js --runInBand --detectOpenHandles --forceExit",
-    "transfer:s3": "node src/infrastructure/s3/migrate_uploads_to_s3.js",
     "create:admin": "node scripts/create_admin.js"
   },
   "dependencies": {
@@ -39,8 +36,6 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "jest": "^29.7.0",
-    "nodemon": "^3.1.9",
-    "supertest": "^7.0.0"
+    "nodemon": "^3.1.9"
   }
 }

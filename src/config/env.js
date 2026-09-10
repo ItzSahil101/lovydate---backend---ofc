@@ -27,6 +27,9 @@ module.exports = {
     accessKey: process.env.S3_ACCESS_KEY || 'lovydate-app',
     secretKey: process.env.S3_SECRET_KEY || '',
     region: process.env.S3_REGION || 'us-east-1',
+    // Endpoint, bucket and access key have LovyDate defaults. A secret key is
+    // the signal that object storage is intentionally configured.
+    configured: Boolean(process.env.S3_SECRET_KEY),
   },
   media: {
     publicUrl: process.env.PUBLIC_MEDIA_URL || `${process.env.PUBLIC_URL || 'https://server.lovydate.fun'}/api/v1/media`,

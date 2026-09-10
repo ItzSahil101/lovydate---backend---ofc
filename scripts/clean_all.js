@@ -1,6 +1,4 @@
 require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
 const { pool } = require('../src/infrastructure/database/pool');
 const { runMigrations } = require('../src/infrastructure/database/migrate');
 const { s3Client } = require('../src/infrastructure/s3/client');
@@ -9,7 +7,7 @@ const env = require('../src/config/env');
 const redis = require('../src/infrastructure/redis/client');
 
 async function clearDatabase() {
-  console.log('\n📦 [1/4] Cleaning PostgreSQL Database...');
+  console.log('\n📦 [1/3] Cleaning PostgreSQL Database...');
   const client = await pool.connect();
   try {
     // Drop all tables in public schema and re-create schema
@@ -30,7 +28,7 @@ async function clearDatabase() {
 }
 
 async function clearMinio() {
-  console.log(`\n🪣 [2/4] Cleaning MinIO Bucket '${env.s3.bucket}' (${env.s3.endpoint})...`);
+  console.log(`\n🪣 [2/3] Cleaning MinIO Bucket '${env.s3.bucket}' (${env.s3.endpoint})...`);
   try {
     let isTruncated = true;
     let continuationToken;
@@ -72,31 +70,8 @@ async function clearMinio() {
   }
 }
 
-async function clearLocalUploads() {
-  console.log('\n📁 [3/4] Cleaning local uploads folder...');
-  try {
-    const uploadsDir = path.join(__dirname, '../uploads');
-    if (fs.existsSync(uploadsDir)) {
-      const files = fs.readdirSync(uploadsDir);
-      let count = 0;
-      for (const file of files) {
-        const fullPath = path.join(uploadsDir, file);
-        if (fs.lstatSync(fullPath).isFile() && file !== '.gitkeep') {
-          fs.unlinkSync(fullPath);
-          count++;
-        }
-      }
-      console.log(`✅ Local uploads: Removed ${count} local files.`);
-    } else {
-      console.log('ℹ️ No local uploads directory found.');
-    }
-  } catch (err) {
-    console.warn('⚠️ Local uploads cleaning notice:', err.message);
-  }
-}
-
 async function clearRedis() {
-  console.log('\n⚡ [4/4] Flushing Redis Cache & Session Keys...');
+  console.log('\n⚡ [3/3] Flushing Redis Cache & Session Keys...');
   try {
     await redis.connect().catch(() => {});
     await redis.flushdb();
@@ -119,14 +94,12 @@ async function main() {
   try {
     await clearDatabase();
     await clearMinio();
-    await clearLocalUploads();
     await clearRedis();
 
     console.log('\n====================================================');
     console.log(`🎉 ALL CLEAN! System reset completed in ${((Date.now() - start) / 1000).toFixed(2)}s.`);
     console.log('   - Database: Cleaned & migrations applied');
     console.log('   - MinIO: All files deleted');
-    console.log('   - Local uploads: Cleaned');
     console.log('   - Redis: Cache flushed');
     console.log('====================================================\n');
   } catch (err) {
@@ -144,7 +117,6 @@ if (require.main === module) {
 module.exports = {
   clearDatabase,
   clearMinio,
-  clearLocalUploads,
   clearRedis,
   main,
 };
