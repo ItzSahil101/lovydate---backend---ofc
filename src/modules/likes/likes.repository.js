@@ -26,7 +26,8 @@ async function insertPass(sourceUserId, targetUserId) {
     if (blockedRes.rows.length > 0) return { blocked: true };
 
     const matchRes = await client.query(
-      `SELECT 1 FROM matches WHERE user_one_id = $1 AND user_two_id = $2`,
+      `SELECT 1 FROM matches
+       WHERE user_one_id = $1 AND user_two_id = $2 AND unmatched_at IS NULL`,
       [userOneId, userTwoId]
     );
     if (matchRes.rows.length > 0) return { alreadyMatched: true };
@@ -106,7 +107,8 @@ async function recordLikeAndCheckMatch(sourceUserId, targetUserId) {
     const matchRes = await client.query(
       `INSERT INTO matches (user_one_id, user_two_id)
        VALUES ($1, $2)
-       ON CONFLICT (user_one_id, user_two_id) DO UPDATE SET created_at = matches.created_at
+        ON CONFLICT (user_one_id, user_two_id) DO UPDATE
+        SET created_at = matches.created_at, unmatched_at = NULL
        RETURNING id, user_one_id AS "userOneId", user_two_id AS "userTwoId", created_at AS "createdAt"`,
       [userOneId, userTwoId]
     );
@@ -161,14 +163,15 @@ async function checkLikeAndMatchStatus(sourceUserId, targetUserId) {
   const userTwoId = sourceUserId < targetUserId ? targetUserId : sourceUserId;
 
   const matchRes = await query(
-    `SELECT m.id AS "matchId", c.id AS "conversationId"
-     FROM matches m
+        `SELECT m.id AS "matchId", c.id AS "conversationId",
+          m.unmatched_at AS "unmatchedAt"
+    FROM matches m
      LEFT JOIN conversations c ON c.match_id = m.id
-     WHERE m.user_one_id = $1 AND m.user_two_id = $2`,
+    WHERE m.user_one_id = $1 AND m.user_two_id = $2`,
     [userOneId, userTwoId]
   );
 
-  const isMatch = matchRes.rows.length > 0;
+  const isMatch = matchRes.rows.length > 0 && matchRes.rows[0].unmatchedAt == null;
   const conversationId = isMatch ? matchRes.rows[0].conversationId : null;
   const matchId = isMatch ? matchRes.rows[0].matchId : null;
 
@@ -192,13 +195,15 @@ async function unlikeUser(sourceUserId, targetUserId) {
       `DELETE FROM likes WHERE source_user_id = $1 AND target_user_id = $2`,
       [sourceUserId, targetUserId]
     );
-    const deleteMatchRes = await client.query(
-      `DELETE FROM matches WHERE user_one_id = $1 AND user_two_id = $2`,
+    const unmatchRes = await client.query(
+      `UPDATE matches
+       SET unmatched_at = NOW()
+       WHERE user_one_id = $1 AND user_two_id = $2 AND unmatched_at IS NULL`,
       [userOneId, userTwoId]
     );
     return {
       unliked: deleteLikeRes.rowCount > 0,
-      unmatched: deleteMatchRes.rowCount > 0,
+      unmatched: unmatchRes.rowCount > 0,
     };
   });
 }

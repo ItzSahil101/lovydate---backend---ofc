@@ -100,6 +100,14 @@ async function sendMessage(conversationId, senderId, payload = {}) {
     throw new ForbiddenError('You are not a member of this conversation');
   }
 
+  const conversationDetails = await chatRepo.getConversationDetails(
+    conversationId,
+    senderId,
+  );
+  if (!conversationDetails || conversationDetails.isMatched === false) {
+    throw new BadRequestError('You are no longer matched', 'CHAT_UNMATCHED');
+  }
+
   const replyToMessageId = payload.replyToMessageId || null;
   if (replyToMessageId !== null) {
     if (!isUuid(replyToMessageId)) {
@@ -142,7 +150,7 @@ async function sendMessage(conversationId, senderId, payload = {}) {
   });
 
   try {
-    const details = await chatRepo.getConversationDetails(conversationId, senderId);
+    const details = conversationDetails;
     if (details && details.partnerUserId) {
       const senderName = details.partnerName ? details.partnerName : 'Someone';
       const preview = type === 'text'
