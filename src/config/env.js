@@ -13,6 +13,9 @@ module.exports = {
   redis: {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
   },
+  proxy: {
+    trust: process.env.TRUST_PROXY === 'false' ? false : (process.env.TRUST_PROXY || 1),
+  },
   jwt: {
     secret: process.env.JWT_SECRET || 'lovydate_jwt_secret_dev_key',
     expiresIn: process.env.JWT_EXPIRES_IN || '15m',

@@ -24,6 +24,9 @@ const notificationsRoutes = require('./modules/notifications/notifications.route
 
 const app = express();
 
+// Preserve the client IP and secure-cookie behavior behind Nginx or a cloud LB.
+app.set('trust proxy', env.proxy.trust);
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));

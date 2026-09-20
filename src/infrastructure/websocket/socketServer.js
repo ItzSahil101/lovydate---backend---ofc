@@ -1,4 +1,5 @@
 const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
 const redis = require('../redis/client');
@@ -8,6 +9,8 @@ const { authenticateAccessToken } = require('../../middleware/auth');
 const { UnauthorizedError } = require('../../shared/errors');
 
 let ioInstance = null;
+let pubClient = null;
+let subClient = null;
 const activeUserSockets = new Map();
 
 async function authenticateAdminSocket(token) {
@@ -40,7 +43,7 @@ function isUserOnline(userId) {
   return activeUserSockets.has(userId);
 }
 
-function initSocketServer(httpServer) {
+async function initSocketServer(httpServer) {
   const io = new Server(httpServer, {
     cors: {
       origin: env.cors.origin,
@@ -49,6 +52,13 @@ function initSocketServer(httpServer) {
     pingTimeout: 20000,
     pingInterval: 25000,
   });
+
+  // Socket.IO broadcasts must cross API instances when the load balancer
+  // sends connected users to different processes.
+  pubClient = redis.duplicate();
+  subClient = redis.duplicate();
+  await Promise.all([pubClient.connect(), subClient.connect()]);
+  io.adapter(createAdapter(pubClient, subClient));
 
   io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
@@ -159,6 +169,15 @@ function getIO() {
   return ioInstance;
 }
 
+async function closeSocketRedis() {
+  await Promise.all([
+    pubClient?.quit().catch(() => {}),
+    subClient?.quit().catch(() => {}),
+  ]);
+  pubClient = null;
+  subClient = null;
+}
+
 function emitToUser(userId, event, data) {
   if (ioInstance) {
     ioInstance.to(`user:${userId}`).emit(event, data);
@@ -187,6 +206,7 @@ function emitToSupportCase(caseId, event, data) {
 
 module.exports = {
   initSocketServer,
+  closeSocketRedis,
   getIO,
   emitToUser,
   emitToConversation,

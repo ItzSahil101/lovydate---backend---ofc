@@ -4,7 +4,7 @@ const env = require('./config/env');
 const app = require('./app');
 const redis = require('./infrastructure/redis/client');
 const { pool } = require('./infrastructure/database/pool');
-const { initSocketServer } = require('./infrastructure/websocket/socketServer');
+const { initSocketServer, closeSocketRedis } = require('./infrastructure/websocket/socketServer');
 const { initWorkers } = require('./infrastructure/queue/workers');
 
 const discoveryService = require('./modules/discovery/discovery.service');
@@ -14,8 +14,6 @@ const { runMigrations } = require('./infrastructure/database/migrate');
 
 const server = http.createServer(app);
 
-initSocketServer(server);
-
 const workers = initWorkers({
   discoveryService,
   profileService,
@@ -23,6 +21,7 @@ const workers = initWorkers({
 
 async function startServer() {
   try {
+    await initSocketServer(server);
     await runMigrations();
   } catch (e) {
     console.error('Server startup aborted because migrations failed:', e.message);
@@ -50,6 +49,13 @@ async function gracefulShutdown(signal) {
     if (workers.notificationsWorker) await workers.notificationsWorker.close();
   } catch (err) {
     console.error('Error closing queue workers:', err);
+  }
+
+  try {
+    await closeSocketRedis();
+    console.log('Socket.IO Redis adapter connections closed.');
+  } catch (err) {
+    console.error('Error closing Socket.IO Redis connections:', err);
   }
 
   try {
