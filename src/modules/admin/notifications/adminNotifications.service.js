@@ -1,8 +1,15 @@
 const { query } = require('../../../infrastructure/database/pool');
 const { logAudit } = require('../audit/adminAudit.service');
 const { BadRequestError, NotFoundError } = require('../../../shared/errors');
+const adminCache = require('../adminCache');
+
+const NOTIFICATION_STATS_CACHE_KEY = 'admin:notifications:stats';
 
 async function getNotificationStats() {
+  return adminCache.getOrSet(NOTIFICATION_STATS_CACHE_KEY, loadNotificationStats);
+}
+
+async function loadNotificationStats() {
   const [statusTodayRes, recentSendsRes, templatesRes] = await Promise.all([
     query(`
       SELECT
@@ -70,6 +77,8 @@ async function createTemplate({ name, title, body, destinationType, destinationD
     ipAddress,
   });
 
+  await adminCache.deleteByPattern(NOTIFICATION_STATS_CACHE_KEY);
+
   return res.rows[0];
 }
 
@@ -100,6 +109,8 @@ async function updateTemplate({ id, name, title, body, destinationType, destinat
     ipAddress,
   });
 
+  await adminCache.deleteByPattern(NOTIFICATION_STATS_CACHE_KEY);
+
   return res.rows[0];
 }
 
@@ -122,6 +133,8 @@ async function deleteTemplate({ id, admin, ipAddress }) {
     details: { name: existingRes.rows[0].name },
     ipAddress,
   });
+
+  await adminCache.deleteByPattern(NOTIFICATION_STATS_CACHE_KEY);
 
   return { success: true, id };
 }

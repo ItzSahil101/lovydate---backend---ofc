@@ -11,18 +11,21 @@ const discoveryService = require('./modules/discovery/discovery.service');
 const profileService = require('./modules/profiles/profile.service');
 
 const { runMigrations } = require('./infrastructure/database/migrate');
+const { preloadAdminCache } = require('./modules/admin/adminCacheWarmup');
 
 const server = http.createServer(app);
 
-const workers = initWorkers({
-  discoveryService,
-  profileService,
-});
+let workers = {};
 
 async function startServer() {
   try {
     await initSocketServer(server);
     await runMigrations();
+    // Do not consume jobs until this replica has the complete schema.
+    workers = initWorkers({
+      discoveryService,
+      profileService,
+    });
   } catch (e) {
     console.error('Server startup aborted because migrations failed:', e.message);
     process.exitCode = 1;
@@ -31,6 +34,11 @@ async function startServer() {
 
   server.listen(env.port, '0.0.0.0', () => {
     console.log(`LovyDate Production Backend listening on port ${env.port} (${env.nodeEnv})`);
+    // Warm expensive admin reads after the instance is accepting health
+    // checks. Failures are non-fatal because requests can still load directly.
+    preloadAdminCache().catch((err) => {
+      console.warn('Admin cache preload failed:', err.message);
+    });
   });
 }
 

@@ -45,7 +45,8 @@ before(async () => {
   // extension in the baseline is unnecessary for these schema tests.
   await db.exec(migration('001_initial_schema.sql').replace(/CREATE EXTENSION[^;]+;/g, ''));
   for (const file of ['002_profile_details.sql', '005_chat_attachments.sql',
-    '006_privacy_settings.sql', '011_chat_message_actions.sql']) {
+    '006_privacy_settings.sql', '011_chat_message_actions.sql',
+    '012_soft_unmatch.sql']) {
     await db.exec(migration(file));
   }
   await db.exec(migration('011_chat_message_actions.sql')); // migration is repeat-safe
@@ -61,7 +62,8 @@ beforeEach(async () => {
   }
   await query(`INSERT INTO matches (id, user_one_id, user_two_id) VALUES ($1, $2, $3)`, [conversation, alice, bob]);
   await query(`INSERT INTO conversations (id, match_id) VALUES ($1, $1)`, [conversation]);
-  await query(`INSERT INTO conversations (id) VALUES ($1)`, [otherConversation]);
+  await query(`INSERT INTO matches (id, user_one_id, user_two_id) VALUES ($1, $2, $3)`, [otherConversation, bob, carol]);
+  await query(`INSERT INTO conversations (id, match_id) VALUES ($1, $1)`, [otherConversation]);
   await query(`INSERT INTO conversation_members (conversation_id, user_id) VALUES
     ($1, $2), ($1, $3), ($4, $2), ($4, $5)`, [conversation, alice, bob, otherConversation, carol]);
 });

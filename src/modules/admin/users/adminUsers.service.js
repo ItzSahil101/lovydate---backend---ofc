@@ -1,6 +1,7 @@
 const usersRepo = require('./adminUsers.repository');
 const { logAudit } = require('../audit/adminAudit.service');
 const { NotFoundError, BadRequestError } = require('../../../shared/errors');
+const adminCache = require('../adminCache');
 
 const ALLOWED_RESTRICTION_TYPES = new Set([
   'ACCOUNT_SUSPENSION',
@@ -10,7 +11,22 @@ const ALLOWED_RESTRICTION_TYPES = new Set([
 ]);
 
 async function listUsers(params) {
-  return usersRepo.listUsers(params);
+  const normalized = {
+    search: params.search?.trim() || '',
+    status: params.status || '',
+    gender: params.gender || '',
+    onboardingCompleted: params.onboardingCompleted ?? '',
+    emailVerified: params.emailVerified ?? '',
+    sort: params.sort || 'newest',
+    limit: params.limit || 25,
+    cursor: params.cursor || '',
+  };
+  const key = `admin:users:list:${Buffer.from(JSON.stringify(normalized)).toString('base64url')}`;
+  return adminCache.getOrSet(key, () => usersRepo.listUsers(normalized));
+}
+
+async function invalidateUserLists() {
+  await adminCache.deleteByPattern('admin:users:list:*');
 }
 
 async function getUserDetail(userId) {
@@ -32,6 +48,7 @@ async function getUserModeration(userId) {
 async function warnUser({ userId, reason, message, admin, ipAddress }) {
   if (!reason) throw new BadRequestError('Reason is required for warning a user');
   const warning = await usersRepo.addWarning(userId, reason, message || reason, admin.id);
+  await invalidateUserLists();
 
   await logAudit({
     adminId: admin.id,
@@ -64,6 +81,7 @@ async function suspendUser({ userId, reason, internalNote, durationDays, admin, 
   );
 
   await usersRepo.deleteUserRefreshTokens(userId);
+  await invalidateUserLists();
 
   await logAudit({
     adminId: admin.id,
@@ -81,6 +99,7 @@ async function suspendUser({ userId, reason, internalNote, durationDays, admin, 
 
 async function unsuspendUser({ userId, reason, admin, ipAddress }) {
   await usersRepo.unsuspendUser(userId);
+  await invalidateUserLists();
 
   await logAudit({
     adminId: admin.id,
@@ -113,6 +132,7 @@ async function addRestriction({ userId, restrictionType, reason, internalNote, d
     expiresAt,
     admin.id
   );
+  await invalidateUserLists();
 
   await logAudit({
     adminId: admin.id,
@@ -130,6 +150,7 @@ async function addRestriction({ userId, restrictionType, reason, internalNote, d
 
 async function removeRestriction({ userId, restrictionId, admin, ipAddress }) {
   await usersRepo.removeRestriction(restrictionId, userId);
+  await invalidateUserLists();
 
   await logAudit({
     adminId: admin.id,
@@ -163,6 +184,7 @@ async function deactivateUser({ userId, reason, admin, ipAddress }) {
   if (!reason) throw new BadRequestError('Reason is required to deactivate user');
   await usersRepo.deactivateUser(userId);
   await usersRepo.deleteUserRefreshTokens(userId);
+  await invalidateUserLists();
 
   await logAudit({
     adminId: admin.id,

@@ -12,6 +12,10 @@ async function runMigrations({ closePool = false } = {}) {
   const client = await pool.connect();
   try {
     console.log('Checking and running database migrations...');
+    // Every API replica starts from the same image. Without a cross-process
+    // lock, two replicas can both decide that a migration is pending and one
+    // will fail while the load balancer is bringing the stack online.
+    await client.query('SELECT pg_advisory_lock($1)', [74196321]);
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
         name VARCHAR(255) PRIMARY KEY,
@@ -41,6 +45,7 @@ async function runMigrations({ closePool = false } = {}) {
     console.error('Migration error:', err.message);
     throw err;
   } finally {
+    await client.query('SELECT pg_advisory_unlock($1)', [74196321]).catch(() => {});
     client.release();
     if (closePool) {
       await pool.end();

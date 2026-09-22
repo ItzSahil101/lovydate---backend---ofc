@@ -14,11 +14,15 @@ async function listUsers({
   const params = [];
 
   if (search) {
-    params.push(`%${search.trim().toLowerCase()}%`);
+    const normalizedSearch = search.trim().toLowerCase();
+    params.push(`%${normalizedSearch}%`);
+    const likeParam = params.length;
+    params.push(normalizedSearch);
+    const exactParam = params.length;
     conditions.push(`(
-      LOWER(u.email) LIKE $${params.length}
-      OR LOWER(p.display_name) LIKE $${params.length}
-      OR u.id::text = '${search.trim()}'
+      LOWER(u.email) LIKE $${likeParam}
+      OR LOWER(p.display_name) LIKE $${likeParam}
+      OR u.id::text = $${exactParam}
     )`);
   }
 
