@@ -10,6 +10,11 @@ router.use(requireAuth);
 router.get(
   '/',
   rateLimiter({ action: 'conversations-list', max: 120, windowSeconds: 60 }),
+  (req, res, next) => {
+    // Serve stale instantly, revalidate in background — matches our 30 s Redis TTL.
+    res.set('Cache-Control', 'private, max-age=10, stale-while-revalidate=20');
+    next();
+  },
   chatController.getConversations
 );
 
@@ -22,6 +27,11 @@ router.get(
 router.get(
   '/:id/messages',
   rateLimiter({ action: 'messages-list', max: 120, windowSeconds: 60 }),
+  (req, res, next) => {
+    // Short window so new messages surface fast; stale-while-revalidate covers the gap.
+    res.set('Cache-Control', 'private, max-age=5, stale-while-revalidate=10');
+    next();
+  },
   chatController.getMessages
 );
 

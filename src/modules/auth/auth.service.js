@@ -274,6 +274,9 @@ async function googleAuth(idToken) {
   } catch (err) {
     throw new UnauthorizedError('Invalid Google identity token', 'INVALID_GOOGLE_TOKEN');
   }
+  if (googleUser.firebase?.sign_in_provider !== 'google.com') {
+    throw new UnauthorizedError('Identity token was not issued by Google sign in', 'INVALID_GOOGLE_PROVIDER');
+  }
   if (!googleUser.email || googleUser.email_verified === false) {
     throw new UnauthorizedError('Google account email is not verified', 'UNVERIFIED_GOOGLE_EMAIL');
   }

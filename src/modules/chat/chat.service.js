@@ -6,8 +6,13 @@ const { ForbiddenError, NotFoundError, BadRequestError } = require('../../shared
 const { isUuid } = require('../../shared/ids');
 const { isManagedMediaUrl } = require('../media/media.service');
 const { assertNoRestriction } = require('../../middleware/restrictions');
+const { cacheWrap, cacheDel, keys } = require('../../infrastructure/redis/cache');
 
 const MESSAGING_DISABLED = 'MESSAGING_DISABLED';
+
+// ── TTLs ──────────────────────────────────────────────────────────────────
+const TTL_CONVERSATIONS = 30;  // seconds — refreshes quickly for unread counts
+const TTL_MESSAGES      = 15;  // seconds — short so new messages appear fast
 
 function validateConversationId(conversationId) {
   if (!isUuid(conversationId)) {
@@ -15,8 +20,28 @@ function validateConversationId(conversationId) {
   }
 }
 
+// ── Invalidation helpers ──────────────────────────────────────────────────
+
+/** Bust the conversations list for both members of a conversation. */
+async function _invalidateConversations(...userIds) {
+  await Promise.all(
+    userIds.filter(Boolean).map((uid) => cacheDel(keys.conversations(uid)))
+  );
+}
+
+/** Bust the messages cache for a conversation for a specific user. */
+async function _invalidateMessages(conversationId, userId) {
+  await cacheDel(keys.messages(conversationId, userId));
+}
+
+// ── Public service methods ────────────────────────────────────────────────
+
 async function listConversations(userId) {
-  return chatRepo.getConversationsForUser(userId);
+  return cacheWrap(
+    keys.conversations(userId),
+    TTL_CONVERSATIONS,
+    () => chatRepo.getConversationsForUser(userId),
+  );
 }
 
 async function getConversation(conversationId, userId) {
@@ -42,27 +67,34 @@ async function listMessages(conversationId, userId, limit = 50, cursor = null) {
   const clampedLimit = Math.min(Math.max(1, limit), 50);
   const decoded = decodeCursor(cursor);
 
-  const { items, hasMore } = await chatRepo.getMessages(
-    conversationId,
-    userId,
-    clampedLimit,
-    decoded
-  );
-
-  let nextCursor = null;
-  if (hasMore && items.length > 0) {
-    const lastItem = items[0];
-    nextCursor = encodeCursor({
-      createdAt: lastItem.createdAt,
-      id: lastItem.id,
-    });
+  // Only cache the first page (no cursor) — paginated pages are cheap since
+  // they're rarely re-requested.
+  if (!cursor) {
+    return cacheWrap(
+      keys.messages(conversationId, userId),
+      TTL_MESSAGES,
+      async () => {
+        const { items, hasMore } = await chatRepo.getMessages(
+          conversationId, userId, clampedLimit, decoded,
+        );
+        let nextCursor = null;
+        if (hasMore && items.length > 0) {
+          nextCursor = encodeCursor({ createdAt: items[0].createdAt, id: items[0].id });
+        }
+        return { items, nextCursor, hasMore };
+      },
+    );
   }
 
-  return {
-    items,
-    nextCursor,
-    hasMore,
-  };
+  // Paginated page — skip cache
+  const { items, hasMore } = await chatRepo.getMessages(
+    conversationId, userId, clampedLimit, decoded,
+  );
+  let nextCursor = null;
+  if (hasMore && items.length > 0) {
+    nextCursor = encodeCursor({ createdAt: items[0].createdAt, id: items[0].id });
+  }
+  return { items, nextCursor, hasMore };
 }
 
 async function sendMessage(conversationId, senderId, payload = {}) {
@@ -100,10 +132,7 @@ async function sendMessage(conversationId, senderId, payload = {}) {
     throw new ForbiddenError('You are not a member of this conversation');
   }
 
-  const conversationDetails = await chatRepo.getConversationDetails(
-    conversationId,
-    senderId,
-  );
+  const conversationDetails = await chatRepo.getConversationDetails(conversationId, senderId);
   if (!conversationDetails || conversationDetails.isMatched === false) {
     throw new BadRequestError('You are no longer matched', 'CHAT_UNMATCHED');
   }
@@ -119,19 +148,23 @@ async function sendMessage(conversationId, senderId, payload = {}) {
     }
   }
 
-  const message = await chatRepo.insertMessage(
-    conversationId,
-    senderId,
-    {
-      content,
-      type,
-      mediaUrl: type === 'text' ? null : payload.mediaUrl,
-      mimeType: type === 'text' ? null : payload.mimeType,
-      sizeBytes: type === 'text' ? null : Number(payload.sizeBytes || 0) || null,
-      durationSeconds: type === 'text' ? null : durationSeconds || null,
-      replyToMessageId,
-    }
-  );
+  const message = await chatRepo.insertMessage(conversationId, senderId, {
+    content,
+    type,
+    mediaUrl: type === 'text' ? null : payload.mediaUrl,
+    mimeType: type === 'text' ? null : payload.mimeType,
+    sizeBytes: type === 'text' ? null : Number(payload.sizeBytes || 0) || null,
+    durationSeconds: type === 'text' ? null : durationSeconds || null,
+    replyToMessageId,
+  });
+
+  // Bust caches for both participants so next poll gets fresh data
+  const partnerId = conversationDetails.partnerUserId;
+  await Promise.all([
+    _invalidateMessages(conversationId, senderId),
+    _invalidateMessages(conversationId, partnerId),
+    _invalidateConversations(senderId, partnerId),
+  ]);
 
   emitToConversation(conversationId, 'message:new', {
     id: message.id,
@@ -152,10 +185,11 @@ async function sendMessage(conversationId, senderId, payload = {}) {
   try {
     const details = conversationDetails;
     if (details && details.partnerUserId) {
-      const senderName = details.partnerName ? details.partnerName : 'Someone';
       const preview = type === 'text'
         ? (content.length > 80 ? content.slice(0, 80) + '…' : content)
-        : (type === 'image' ? '📷 Sent a photo' : (type === 'audio' ? '🎤 Sent a voice message' : '🎥 Sent a video'));
+        : (type === 'image' ? '📷 Sent a photo'
+          : type === 'audio' ? '🎤 Sent a voice message'
+          : '🎥 Sent a video');
 
       sendPushToUser(details.partnerUserId, {
         title: 'New message from ' + (details.displayName || 'your match'),
@@ -195,6 +229,7 @@ async function reactToMessage(conversationId, messageId, userId, payload = {}) {
     await chatRepo.removeReaction(messageId, userId);
     const updated = await chatRepo.getMessage(conversationId, messageId, userId);
     emitToConversation(conversationId, 'message:updated', updated);
+    await _invalidateMessages(conversationId, userId);
     return updated;
   }
   if (!ALLOWED_REACTIONS.has(emoji)) {
@@ -202,6 +237,7 @@ async function reactToMessage(conversationId, messageId, userId, payload = {}) {
   }
   const updated = await chatRepo.setReaction(conversationId, messageId, userId, emoji);
   emitToConversation(conversationId, 'message:updated', updated);
+  await _invalidateMessages(conversationId, userId);
   return updated;
 }
 
@@ -215,6 +251,7 @@ async function deleteMessageForMe(conversationId, messageId, userId) {
     throw new NotFoundError('Message not found');
   }
   await chatRepo.deleteMessageForUser(conversationId, messageId, userId);
+  await _invalidateMessages(conversationId, userId);
   return { deleted: true };
 }
 
@@ -231,6 +268,12 @@ async function unsendMessage(conversationId, messageId, userId) {
   }
   const updated = await chatRepo.unsendMessage(conversationId, messageId, userId);
   emitToConversation(conversationId, 'message:updated', updated);
+  // Bust messages cache for both sides
+  const details = await chatRepo.getConversationDetails(conversationId, userId);
+  await Promise.all([
+    _invalidateMessages(conversationId, userId),
+    details?.partnerUserId ? _invalidateMessages(conversationId, details.partnerUserId) : null,
+  ]);
   return updated;
 }
 
@@ -243,11 +286,13 @@ async function markRead(conversationId, userId, lastMessageId) {
   if (!isMember) {
     throw new ForbiddenError('You are not a member of this conversation');
   }
-
   if (!(await chatRepo.getMessage(conversationId, lastMessageId, userId))) {
     throw new NotFoundError('Message not found in this conversation');
   }
   await chatRepo.markConversationRead(conversationId, userId, lastMessageId);
+
+  // Unread count changed — bust conversations list so it reflects immediately
+  await _invalidateConversations(userId);
 
   emitToConversation(conversationId, 'message:read', {
     conversationId,

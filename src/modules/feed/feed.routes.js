@@ -5,7 +5,15 @@ const { requireAuth } = require('../../middleware/auth');
 
 router.use(requireAuth);
 
-router.get('/', feedController.getFeed);
+router.get(
+  '/',
+  (req, res, next) => {
+    // Feed is shared content — 30 s fresh, serve stale for another 30 s while revalidating.
+    res.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=30');
+    next();
+  },
+  feedController.getFeed
+);
 router.post('/', feedController.createPost);
 router.put('/:postId', feedController.updatePost);
 router.patch('/:postId', feedController.updatePost);

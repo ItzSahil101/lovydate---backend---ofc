@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const env = require('../../../config/env');
-const { UnauthorizedError, ForbiddenError } = require('../../../shared/errors');
+const { AppError, UnauthorizedError, ForbiddenError } = require('../../../shared/errors');
 const { query } = require('../../../infrastructure/database/pool');
 
 function hashToken(token) {
