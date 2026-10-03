@@ -3,9 +3,16 @@ const { success } = require('../../shared/response');
 
 async function getFeed(req, res, next) {
   try {
-    const limit = parseInt(req.query.limit || '20', 10);
-    const posts = await feedService.getFeed(req.user.userId, limit);
-    return success(res, posts);
+    const limit = Math.min(parseInt(req.query.limit || '15', 10), 50);
+    const page = Math.max(parseInt(req.query.page || '1', 10), 1);
+
+    const result = await feedService.getFeed(
+      req.user.userId,
+      limit,
+      page
+    );
+
+    return success(res, result);
   } catch (err) {
     next(err);
   }

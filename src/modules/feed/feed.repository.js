@@ -2,7 +2,8 @@ const { query, withTransaction } = require('../../infrastructure/database/pool')
 const { UnauthorizedError, ForbiddenError, NotFoundError } = require('../../shared/errors');
 const notificationService = require('../notifications/notifications.service');
 
-async function getFeedPosts(userId, limit = 20) {
+async function getFeedPosts(userId, limit = 15, page = 1) {
+   const offset = (page - 1) * limit;
   // Determine viewer's preferred gender for feed prioritization
   const preferredGenders = [];
   try {
@@ -73,23 +74,28 @@ async function getFeedPosts(userId, limit = 20) {
          OR (b.blocker_user_id = p.user_id AND b.blocked_user_id = $1)
     )
     ORDER BY
-      CASE
-        WHEN p.user_id = $1 THEN 0
-        WHEN $3::varchar[] IS NOT NULL AND array_length($3::varchar[], 1) > 0 AND prof.gender = ANY($3::varchar[]) THEN 1
-        WHEN $3::varchar[] IS NULL OR array_length($3::varchar[], 1) IS NULL THEN 1
-        ELSE 2
-      END ASC,
-      p.created_at DESC
-    LIMIT $2
+  CASE
+    WHEN p.user_id = $1 THEN 0
+    WHEN $3::varchar[] IS NOT NULL
+      AND array_length($3::varchar[], 1) > 0
+      AND prof.gender = ANY($3::varchar[]) THEN 1
+    WHEN $3::varchar[] IS NULL
+      OR array_length($3::varchar[], 1) IS NULL THEN 1
+    ELSE 2
+  END ASC,
+  p.created_at DESC,
+  p.id DESC
+LIMIT $2
+OFFSET $4
   `;
 
   let res;
   try {
-    res = await query(sql, [userId, limit, preferredGenders]);
+    res = await query(sql, [userId, limit, preferredGenders, offset]);
   } catch (err) {
     if (err.message && err.message.includes('is_edited')) {
       await query(`ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
-      res = await query(sql, [userId, limit, preferredGenders]);
+      res = await query(sql, [userId, limit, preferredGenders, offset]);
     } else {
       throw err;
     }

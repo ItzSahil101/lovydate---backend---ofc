@@ -24,11 +24,20 @@ async function _invalidateFeed(userId) {
 
 // ── Public service methods ────────────────────────────────────────────────
 
-async function getFeed(userId, limit = 20) {
+async function getFeed(userId, limit = 15, page = 1) {
   return cacheWrap(
-    keys.feed(userId, limit),
+    keys.feed(userId, limit, page),
     TTL_FEED,
-    () => feedRepo.getFeedPosts(userId, limit),
+    async () => {
+      const posts = await feedRepo.getFeedPosts(userId, limit, page);
+
+      return {
+        items: posts,
+        page,
+        limit,
+        hasMore: posts.length === limit,
+      };
+    },
   );
 }
 

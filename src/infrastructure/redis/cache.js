@@ -101,7 +101,7 @@ const keys = {
     `chat:messages:${conversationId}:${userId}`,
 
   /** Community feed for a user */
-  feed: (userId, limit) => `feed:${userId}:${limit}`,
+  feed: (userId, limit, page = 1) => `feed:${userId}:${limit}:${page}`,
 
   /** Global feed (shared across all users, shorter TTL) */
   feedGlobal: (limit) => `feed:global:${limit}`,
