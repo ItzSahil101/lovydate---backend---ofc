@@ -1,9 +1,16 @@
-const { query, withTransaction } = require('../../infrastructure/database/pool');
-const { UnauthorizedError, ForbiddenError, NotFoundError } = require('../../shared/errors');
-const notificationService = require('../notifications/notifications.service');
+const {
+  query,
+  withTransaction,
+} = require("../../infrastructure/database/pool");
+const {
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+} = require("../../shared/errors");
+const notificationService = require("../notifications/notifications.service");
 
 async function getFeedPosts(userId, limit = 15, page = 1) {
-   const offset = (page - 1) * limit;
+  const offset = (page - 1) * limit;
   // Determine viewer's preferred gender for feed prioritization
   const preferredGenders = [];
   try {
@@ -12,24 +19,34 @@ async function getFeedPosts(userId, limit = 15, page = 1) {
        FROM profiles p
        LEFT JOIN user_preferences up ON up.user_id = p.user_id
        WHERE p.user_id = $1`,
-      [userId]
+      [userId],
     );
     if (userPrefRes.rows.length > 0) {
       const { gender, interestedIn } = userPrefRes.rows[0];
-      const normGender = (gender || '').toLowerCase();
+      const normGender = (gender || "").toLowerCase();
 
       // If user has an exclusive single-gender preference (e.g. ['Women'] or ['Men'])
-      if (interestedIn && Array.isArray(interestedIn) && interestedIn.length === 1 && !interestedIn.includes('Everyone')) {
+      if (
+        interestedIn &&
+        Array.isArray(interestedIn) &&
+        interestedIn.length === 1 &&
+        !interestedIn.includes("Everyone")
+      ) {
         const pref = interestedIn[0];
-        if (pref === 'Men' || pref === 'Man') preferredGenders.push('Man', 'Men');
-        else if (pref === 'Women' || pref === 'Woman') preferredGenders.push('Woman', 'Women');
+        if (pref === "Men" || pref === "Man")
+          preferredGenders.push("Man", "Men");
+        else if (pref === "Women" || pref === "Woman")
+          preferredGenders.push("Woman", "Women");
         else preferredGenders.push(pref);
       } else {
         // Standard rule: Man sees Women first, Woman sees Men first
-        if (normGender.includes('man') && !normGender.includes('wo')) {
-          preferredGenders.push('Woman', 'Women');
-        } else if (normGender.includes('woman') || normGender.includes('women')) {
-          preferredGenders.push('Man', 'Men');
+        if (normGender.includes("man") && !normGender.includes("wo")) {
+          preferredGenders.push("Woman", "Women");
+        } else if (
+          normGender.includes("woman") ||
+          normGender.includes("women")
+        ) {
+          preferredGenders.push("Man", "Men");
         }
       }
     }
@@ -73,28 +90,23 @@ async function getFeedPosts(userId, limit = 15, page = 1) {
       WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = p.user_id)
          OR (b.blocker_user_id = p.user_id AND b.blocked_user_id = $1)
     )
-    ORDER BY
-  CASE
-    WHEN p.user_id = $1 THEN 0
-    WHEN $3::varchar[] IS NOT NULL
-      AND array_length($3::varchar[], 1) > 0
-      AND prof.gender = ANY($3::varchar[]) THEN 1
-    WHEN $3::varchar[] IS NULL
-      OR array_length($3::varchar[], 1) IS NULL THEN 1
-    ELSE 2
-  END ASC,
+
+ORDER BY
   p.created_at DESC,
   p.id DESC
 LIMIT $2
 OFFSET $4
+
   `;
 
   let res;
   try {
     res = await query(sql, [userId, limit, preferredGenders, offset]);
   } catch (err) {
-    if (err.message && err.message.includes('is_edited')) {
-      await query(`ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE;`).catch(() => {});
+    if (err.message && err.message.includes("is_edited")) {
+      await query(
+        `ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE;`,
+      ).catch(() => {});
       res = await query(sql, [userId, limit, preferredGenders, offset]);
     } else {
       throw err;
@@ -110,7 +122,7 @@ OFFSET $4
      FROM post_photos
      WHERE post_id = ANY($1::uuid[])
      ORDER BY display_order ASC`,
-    [postIds]
+    [postIds],
   );
 
   const photosMap = {};
@@ -125,13 +137,16 @@ OFFSET $4
   }));
 }
 
-async function createPost(userId, { content, locationName = null, photos = [] }) {
+async function createPost(
+  userId,
+  { content, locationName = null, photos = [] },
+) {
   const post = await withTransaction(async (client) => {
     const postRes = await client.query(
       `INSERT INTO posts (user_id, content, location_name, is_edited, created_at, updated_at)
        VALUES ($1, $2, $3, FALSE, NOW(), NOW())
        RETURNING id, user_id AS "userId", content, location_name AS "locationName", is_edited AS "isEdited", created_at AS "createdAt"`,
-      [userId, content, locationName]
+      [userId, content, locationName],
     );
 
     const inserted = postRes.rows[0];
@@ -141,24 +156,24 @@ async function createPost(userId, { content, locationName = null, photos = [] })
         await client.query(
           `INSERT INTO post_photos (post_id, url, display_order, created_at)
            VALUES ($1, $2, $3, NOW())`,
-          [inserted.id, photos[i], i]
+          [inserted.id, photos[i], i],
         );
       }
     }
 
     const userProf = await client.query(
       `SELECT display_name AS "authorName" FROM profiles WHERE user_id = $1`,
-      [userId]
+      [userId],
     );
     const userPhoto = await client.query(
       `SELECT url FROM profile_photos WHERE user_id = $1 ORDER BY display_order ASC LIMIT 1`,
-      [userId]
+      [userId],
     );
 
     return {
       ...inserted,
-      authorName: userProf.rows[0]?.authorName || 'Me',
-      authorAvatar: userPhoto.rows[0]?.url || '',
+      authorName: userProf.rows[0]?.authorName || "Me",
+      authorAvatar: userPhoto.rows[0]?.url || "",
       isVerified: true,
       photos,
       likesCount: 0,
@@ -169,24 +184,33 @@ async function createPost(userId, { content, locationName = null, photos = [] })
 
   // Notify any mentioned users asynchronously
   if (content) {
-    notificationService.notifyMentions({
-      senderId: userId,
-      text: content,
-      entityId: post.id,
-      type: 'mention',
-    }).catch(() => {});
+    notificationService
+      .notifyMentions({
+        senderId: userId,
+        text: content,
+        entityId: post.id,
+        type: "mention",
+      })
+      .catch(() => {});
   }
 
   return post;
 }
 
-async function updatePost(userId, postId, { content, locationName = null, photos = null }) {
-  const check = await query(`SELECT user_id, content FROM posts WHERE id = $1`, [postId]);
+async function updatePost(
+  userId,
+  postId,
+  { content, locationName = null, photos = null },
+) {
+  const check = await query(
+    `SELECT user_id, content FROM posts WHERE id = $1`,
+    [postId],
+  );
   if (check.rows.length === 0) {
-    throw new NotFoundError('Post not found');
+    throw new NotFoundError("Post not found");
   }
   if (check.rows[0].user_id !== userId) {
-    throw new UnauthorizedError('You can only edit your own posts');
+    throw new UnauthorizedError("You can only edit your own posts");
   }
 
   const updated = await withTransaction(async (client) => {
@@ -195,47 +219,49 @@ async function updatePost(userId, postId, { content, locationName = null, photos
        SET content = $1, location_name = $2, is_edited = TRUE, updated_at = NOW()
        WHERE id = $3
        RETURNING id, user_id AS "userId", content, location_name AS "locationName", is_edited AS "isEdited", created_at AS "createdAt", updated_at AS "updatedAt"`,
-      [content, locationName, postId]
+      [content, locationName, postId],
     );
 
     const row = postRes.rows[0];
 
     if (Array.isArray(photos)) {
-      await client.query(`DELETE FROM post_photos WHERE post_id = $1`, [postId]);
+      await client.query(`DELETE FROM post_photos WHERE post_id = $1`, [
+        postId,
+      ]);
       for (let i = 0; i < photos.length; i++) {
         await client.query(
           `INSERT INTO post_photos (post_id, url, display_order, created_at)
            VALUES ($1, $2, $3, NOW())`,
-          [postId, photos[i], i]
+          [postId, photos[i], i],
         );
       }
     }
 
     const currentPhotos = await client.query(
       `SELECT url FROM post_photos WHERE post_id = $1 ORDER BY display_order ASC`,
-      [postId]
+      [postId],
     );
 
     const userProf = await client.query(
       `SELECT display_name AS "authorName" FROM profiles WHERE user_id = $1`,
-      [userId]
+      [userId],
     );
     const userPhoto = await client.query(
       `SELECT url FROM profile_photos WHERE user_id = $1 ORDER BY display_order ASC LIMIT 1`,
-      [userId]
+      [userId],
     );
     const counts = await client.query(
       `SELECT
          (SELECT COUNT(*)::int FROM post_likes WHERE post_id = $1) AS "likesCount",
          (SELECT COUNT(*)::int FROM post_comments WHERE post_id = $1) AS "commentsCount",
          EXISTS (SELECT 1 FROM post_likes WHERE post_id = $1 AND user_id = $2) AS "isLiked"`,
-      [postId, userId]
+      [postId, userId],
     );
 
     return {
       ...row,
-      authorName: userProf.rows[0]?.authorName || 'Me',
-      authorAvatar: userPhoto.rows[0]?.url || '',
+      authorName: userProf.rows[0]?.authorName || "Me",
+      authorAvatar: userPhoto.rows[0]?.url || "",
       isVerified: true,
       photos: currentPhotos.rows.map((p) => p.url),
       likesCount: counts.rows[0]?.likesCount || 0,
@@ -246,30 +272,34 @@ async function updatePost(userId, postId, { content, locationName = null, photos
 
   // Notify any newly mentioned users
   if (content) {
-    notificationService.notifyMentions({
-      senderId: userId,
-      text: content,
-      entityId: postId,
-      type: 'mention',
-    }).catch(() => {});
+    notificationService
+      .notifyMentions({
+        senderId: userId,
+        text: content,
+        entityId: postId,
+        type: "mention",
+      })
+      .catch(() => {});
   }
 
   return updated;
 }
 
 async function deletePost(userId, postId) {
-  const check = await query(`SELECT user_id FROM posts WHERE id = $1`, [postId]);
+  const check = await query(`SELECT user_id FROM posts WHERE id = $1`, [
+    postId,
+  ]);
   if (check.rows.length === 0) {
-    throw new NotFoundError('Post not found');
+    throw new NotFoundError("Post not found");
   }
   if (check.rows[0].user_id !== userId) {
-    throw new UnauthorizedError('You can only delete your own posts');
+    throw new UnauthorizedError("You can only delete your own posts");
   }
   await query(`DELETE FROM posts WHERE id = $1`, [postId]);
   return true;
 }
 
-async function reportPost(userId, postId, reason = 'Inappropriate content') {
+async function reportPost(userId, postId, reason = "Inappropriate content") {
   await query(
     `INSERT INTO reports (
        reporter_user_id, reported_user_id, reason, category, target_type, target_id
@@ -277,7 +307,7 @@ async function reportPost(userId, postId, reason = 'Inappropriate content') {
      SELECT $1, p.user_id, $3, 'Inappropriate Content', 'post', p.id::text
      FROM posts p
      WHERE p.id = $2`,
-    [userId, postId, reason]
+    [userId, postId, reason],
   );
   return { reported: true };
 }
@@ -295,10 +325,13 @@ async function assertCanInteractWithPost(userId, postId) {
          WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = p.user_id)
             OR (b.blocked_user_id = $1 AND b.blocker_user_id = p.user_id)
        )`,
-    [userId, postId]
+    [userId, postId],
   );
   if (res.rows.length === 0) {
-    throw new ForbiddenError('You cannot interact with this post', 'USER_INTERACTION_BLOCKED');
+    throw new ForbiddenError(
+      "You cannot interact with this post",
+      "USER_INTERACTION_BLOCKED",
+    );
   }
   return res.rows[0].authorId;
 }
@@ -307,33 +340,38 @@ async function togglePostLike(userId, postId) {
   const authorId = await assertCanInteractWithPost(userId, postId);
   const existing = await query(
     `SELECT 1 FROM post_likes WHERE user_id = $1 AND post_id = $2`,
-    [userId, postId]
+    [userId, postId],
   );
 
   if (existing.rows.length > 0) {
-    await query(`DELETE FROM post_likes WHERE user_id = $1 AND post_id = $2`, [userId, postId]);
+    await query(`DELETE FROM post_likes WHERE user_id = $1 AND post_id = $2`, [
+      userId,
+      postId,
+    ]);
     return { liked: false };
   } else {
     await query(
       `INSERT INTO post_likes (user_id, post_id, created_at) VALUES ($1, $2, NOW())`,
-      [userId, postId]
+      [userId, postId],
     );
 
     // Send notification to post author
     if (authorId !== userId) {
-        const senderProf = await query(
-          `SELECT display_name AS "senderName" FROM profiles WHERE user_id = $1`,
-          [userId]
-        );
-        const senderName = senderProf.rows[0]?.senderName || 'Someone';
+      const senderProf = await query(
+        `SELECT display_name AS "senderName" FROM profiles WHERE user_id = $1`,
+        [userId],
+      );
+      const senderName = senderProf.rows[0]?.senderName || "Someone";
 
-        notificationService.createNotification({
+      notificationService
+        .createNotification({
           recipientId: authorId,
           senderId: userId,
-          type: 'like',
+          type: "like",
           entityId: postId,
           message: `${senderName} liked your post`,
-        }).catch(() => {});
+        })
+        .catch(() => {});
     }
 
     return { liked: true };
@@ -370,24 +408,35 @@ async function getPostComments(postId, userId) {
             OR (b.blocked_user_id = $2 AND b.blocker_user_id = c.user_id)
        )
      ORDER BY c.created_at ASC`,
-    [postId, userId]
+    [postId, userId],
   );
   return res.rows;
 }
 
-async function addPostComment(userId, postId, commentText, parentCommentId = null) {
+async function addPostComment(
+  userId,
+  postId,
+  commentText,
+  parentCommentId = null,
+) {
   await assertCanInteractWithPost(userId, postId);
   const postSettings = await query(
     `SELECT COALESCE(is_comments_disabled, FALSE) AS "commentsDisabled"
      FROM posts WHERE id = $1`,
-    [postId]
+    [postId],
   );
   if (postSettings.rows[0]?.commentsDisabled) {
-    throw new ForbiddenError('Comments are disabled for this post', 'COMMENTS_DISABLED');
+    throw new ForbiddenError(
+      "Comments are disabled for this post",
+      "COMMENTS_DISABLED",
+    );
   }
   let replyToUserId = null;
   if (parentCommentId) {
-    const parentCheck = await query(`SELECT user_id FROM post_comments WHERE id = $1`, [parentCommentId]);
+    const parentCheck = await query(
+      `SELECT user_id FROM post_comments WHERE id = $1`,
+      [parentCommentId],
+    );
     if (parentCheck.rows.length > 0) {
       replyToUserId = parentCheck.rows[0].user_id;
     }
@@ -397,63 +446,77 @@ async function addPostComment(userId, postId, commentText, parentCommentId = nul
     `INSERT INTO post_comments (user_id, post_id, comment_text, parent_comment_id, reply_to_user_id, created_at)
      VALUES ($1, $2, $3, $4, $5, NOW())
      RETURNING id, user_id AS "userId", comment_text AS "commentText", parent_comment_id AS "parentCommentId", reply_to_user_id AS "replyToUserId", created_at AS "createdAt"`,
-    [userId, postId, commentText, parentCommentId || null, replyToUserId]
+    [userId, postId, commentText, parentCommentId || null, replyToUserId],
   );
   const comment = res.rows[0];
   const userProf = await query(
     `SELECT prof.display_name AS "authorName",
        (SELECT url FROM profile_photos WHERE user_id = $1 ORDER BY display_order ASC LIMIT 1) AS "authorAvatar"
      FROM profiles prof WHERE prof.user_id = $1`,
-    [userId]
+    [userId],
   );
 
-  const senderName = userProf.rows[0]?.authorName || 'Someone';
-  const snippet = commentText.length > 40 ? `${commentText.substring(0, 37)}...` : commentText;
+  const senderName = userProf.rows[0]?.authorName || "Someone";
+  const snippet =
+    commentText.length > 40
+      ? `${commentText.substring(0, 37)}...`
+      : commentText;
 
   // If this is a reply to another comment, notify the parent comment author
   if (replyToUserId && replyToUserId !== userId) {
-    notificationService.createNotification({
-      recipientId: replyToUserId,
-      senderId: userId,
-      type: 'comment',
-      entityId: postId,
-      message: `${senderName} replied to your comment: "${snippet}"`,
-    }).catch(() => {});
+    notificationService
+      .createNotification({
+        recipientId: replyToUserId,
+        senderId: userId,
+        type: "comment",
+        entityId: postId,
+        message: `${senderName} replied to your comment: "${snippet}"`,
+      })
+      .catch(() => {});
   }
 
   // Also notify post author (if not the sender and not the parent comment author already notified)
-  const postRes = await query(`SELECT user_id FROM posts WHERE id = $1`, [postId]);
+  const postRes = await query(`SELECT user_id FROM posts WHERE id = $1`, [
+    postId,
+  ]);
   if (postRes.rows.length > 0) {
     const authorId = postRes.rows[0].user_id;
     if (authorId !== userId && authorId !== replyToUserId) {
-      notificationService.createNotification({
-        recipientId: authorId,
-        senderId: userId,
-        type: 'comment',
-        entityId: postId,
-        message: `${senderName} commented: "${snippet}"`,
-      }).catch(() => {});
+      notificationService
+        .createNotification({
+          recipientId: authorId,
+          senderId: userId,
+          type: "comment",
+          entityId: postId,
+          message: `${senderName} commented: "${snippet}"`,
+        })
+        .catch(() => {});
     }
   }
 
   // Also notify mentions in comment
-  notificationService.notifyMentions({
-    senderId: userId,
-    text: commentText,
-    entityId: postId,
-    type: 'mention',
-  }).catch(() => {});
+  notificationService
+    .notifyMentions({
+      senderId: userId,
+      text: commentText,
+      entityId: postId,
+      type: "mention",
+    })
+    .catch(() => {});
 
   let replyToUserName = null;
   if (replyToUserId) {
-    const targetProf = await query(`SELECT display_name FROM profiles WHERE user_id = $1`, [replyToUserId]);
+    const targetProf = await query(
+      `SELECT display_name FROM profiles WHERE user_id = $1`,
+      [replyToUserId],
+    );
     replyToUserName = targetProf.rows[0]?.display_name || null;
   }
 
   return {
     ...comment,
-    authorName: userProf.rows[0]?.authorName || 'Me',
-    authorAvatar: userProf.rows[0]?.authorAvatar || '',
+    authorName: userProf.rows[0]?.authorName || "Me",
+    authorAvatar: userProf.rows[0]?.authorAvatar || "",
     replyToUserName,
   };
 }
@@ -464,14 +527,16 @@ async function deletePostComment(userId, postId, commentId) {
      FROM post_comments c
      JOIN posts p ON p.id = c.post_id
      WHERE c.id = $1 AND c.post_id = $2`,
-    [commentId, postId]
+    [commentId, postId],
   );
   if (commentCheck.rows.length === 0) {
-    throw new NotFoundError('Comment not found');
+    throw new NotFoundError("Comment not found");
   }
   const { user_id: commentAuthorId, postAuthorId } = commentCheck.rows[0];
   if (commentAuthorId !== userId && postAuthorId !== userId) {
-    throw new UnauthorizedError('You can only delete your own comments or comments on your posts');
+    throw new UnauthorizedError(
+      "You can only delete your own comments or comments on your posts",
+    );
   }
   await query(`DELETE FROM post_comments WHERE id = $1`, [commentId]);
   return true;
