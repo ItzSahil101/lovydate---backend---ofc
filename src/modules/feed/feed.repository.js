@@ -95,19 +95,19 @@ ORDER BY
   p.created_at DESC,
   p.id DESC
 LIMIT $2
-OFFSET $4
+OFFSET $3
 
   `;
 
   let res;
   try {
-    res = await query(sql, [userId, limit, preferredGenders, offset]);
+    res = await query(sql, [userId, limit, offset]);
   } catch (err) {
     if (err.message && err.message.includes("is_edited")) {
       await query(
         `ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE;`,
       ).catch(() => {});
-      res = await query(sql, [userId, limit, preferredGenders, offset]);
+      res = await query(sql, [userId, limit, offset]);
     } else {
       throw err;
     }
