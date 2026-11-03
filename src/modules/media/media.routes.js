@@ -1,3 +1,4 @@
+
 const express = require('express');
 const multer = require('multer');
 const router = express.Router();
@@ -9,26 +10,14 @@ const { requireNoRestriction } = require('../../middleware/restrictions');
 
 const storage = multer.memoryStorage();
 
-const imageFileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new BadRequestError('Only JPEG, PNG, and WEBP images are supported', 'INVALID_FILE_TYPE'), false);
-  }
-};
-
-const upload = multer({
-  storage,
-  fileFilter: imageFileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-  },
-});
+const imageFileTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
 
 const chatFileTypes = new Set([
   'image/jpeg',
-  'image/jpg',
   'image/png',
   'image/webp',
   'image/gif',
@@ -44,13 +33,41 @@ const chatFileTypes = new Set([
   'video/x-m4v',
 ]);
 
+const imageFileFilter = (req, file, cb) => {
+  if (imageFileTypes.has((file.mimetype || '').toLowerCase())) {
+    cb(null, true);
+  } else {
+    cb(
+      new BadRequestError(
+        'Only JPEG, PNG, and WEBP images are supported',
+        'INVALID_FILE_TYPE'
+      ),
+      false
+    );
+  }
+};
+
+const upload = multer({
+  storage,
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+});
+
 const chatUpload = multer({
   storage,
   fileFilter: (req, file, cb) => {
     if (chatFileTypes.has((file.mimetype || '').toLowerCase())) {
       cb(null, true);
     } else {
-      cb(new BadRequestError('Unsupported chat media type', 'INVALID_FILE_TYPE'), false);
+      cb(
+        new BadRequestError(
+          'Unsupported chat media type',
+          'INVALID_FILE_TYPE'
+        ),
+        false
+      );
     }
   },
   limits: {
@@ -71,8 +88,6 @@ router.post(
   mediaController.uploadSingle
 );
 
-// Feed media has its own restricted endpoint so a feed ban is enforced before
-// bytes are persisted. General profile/onboarding uploads remain available.
 router.post(
   '/feed-upload',
   requireNoRestriction('FEED_POSTING_DISABLED'),

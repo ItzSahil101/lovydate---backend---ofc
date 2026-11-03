@@ -1,6 +1,6 @@
-
 const path = require('path');
 const sharp = require('sharp');
+const fileTypeModule = import('file-type');
 const { v4: uuidv4 } = require('uuid');
 const {
   PutObjectCommand,
@@ -9,6 +9,31 @@ const {
 const { s3Client } = require('../../infrastructure/s3/client');
 const env = require('../../config/env');
 const { AppError } = require('../../shared/errors');
+
+const IMAGE_FORMATS = {
+  'image/jpeg': {
+    extension: '.jpg',
+    mimetype: 'image/jpeg',
+  },
+  'image/png': {
+    extension: '.png',
+    mimetype: 'image/png',
+  },
+  'image/webp': {
+    extension: '.webp',
+    mimetype: 'image/webp',
+  },
+};
+
+function normalizeMimeType(mimetype = '') {
+  const normalized = mimetype.toLowerCase();
+  return normalized === 'image/jpg' ? 'image/jpeg' : normalized;
+}
+
+async function detectFileType(buffer) {
+  const { fileTypeFromBuffer } = await fileTypeModule;
+  return fileTypeFromBuffer(buffer);
+}
 
 function getPublicUrl(key) {
   if (env.media && env.media.publicUrl) {
@@ -31,9 +56,11 @@ function isManagedMediaUrl(url) {
 
   try {
     const candidate = new URL(url);
-    const base = new URL(
-      `${env.media.publicUrl.replace(/\/+$/, '')}/`
-    );
+    const publicUrl = env.media && env.media.publicUrl;
+
+    if (!publicUrl) return false;
+
+    const base = new URL(`${publicUrl.replace(/\/+$/, '')}/`);
 
     return (
       candidate.origin === base.origin &&
@@ -82,39 +109,43 @@ function readMp4DurationSeconds(buffer) {
   return NaN;
 }
 
-// Optimizes supported images and keeps filename extensions consistent.
-async function optimizeImage(file) {
-  const formats = {
-    'image/jpeg': {
-      extension: '.jpg',
-      mimetype: 'image/jpeg',
-    },
-    'image/jpg': {
-      extension: '.jpg',
-      mimetype: 'image/jpeg',
-    },
-    'image/png': {
-      extension: '.png',
-      mimetype: 'image/png',
-    },
-    'image/webp': {
-      extension: '.webp',
-      mimetype: 'image/webp',
-    },
-  };
+function invalidImage(message = 'Invalid or unsupported image file.') {
+  return new AppError(message, 400, 'INVALID_IMAGE');
+}
 
-  const format = formats[file.mimetype];
+// Validates actual file signatures, not just client-provided MIME types.
+async function validateImageBuffer(file) {
+  if (!Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
+    throw invalidImage();
+  }
 
-  // Leave GIF, audio, video and unsupported files unchanged.
-  if (!format) return file;
+  const detected = await detectFileType(file.buffer);
 
-  if (!Buffer.isBuffer(file.buffer)) {
-    throw new AppError(
-      'Invalid image file.',
-      400,
-      'INVALID_IMAGE'
+  if (!detected || !IMAGE_FORMATS[detected.mime]) {
+    throw invalidImage('The uploaded file is not a supported image.');
+  }
+
+  const declaredMime = normalizeMimeType(file.mimetype);
+  const expected = IMAGE_FORMATS[declaredMime];
+
+  if (!expected || detected.mime !== expected.mimetype) {
+    throw invalidImage(
+      'The image content does not match its declared file type.'
     );
   }
+
+  return detected;
+}
+
+// Optimizes supported images and keeps filename extensions consistent.
+async function optimizeImage(file) {
+  const declaredMime = normalizeMimeType(file.mimetype);
+  const format = IMAGE_FORMATS[declaredMime];
+
+  // This function only optimizes supported image formats.
+  if (!format) return file;
+
+  await validateImageBuffer(file);
 
   try {
     const pipeline = sharp(file.buffer, {
@@ -163,9 +194,12 @@ async function optimizeImage(file) {
       originalname: `${originalName}${format.extension}`,
     };
 
-    // Keep the original bytes if optimization makes the file larger.
+    // Keep original bytes if optimization makes the file larger.
     if (optimizedBuffer.length >= file.buffer.length) {
-      return updatedFile;
+      return {
+        ...updatedFile,
+        size: file.buffer.length,
+      };
     }
 
     return {
@@ -221,7 +255,6 @@ async function uploadFileToS3(file) {
     );
   }
 
-  // Optimize images before uploading. Other media remains unchanged.
   const optimizedFile = await optimizeImage(file);
 
   const ext =
