@@ -1,6 +1,5 @@
 const path = require('path');
 const sharp = require('sharp');
-const fileTypeModule = import('file-type');
 const { v4: uuidv4 } = require('uuid');
 const {
   PutObjectCommand,
@@ -30,9 +29,40 @@ function normalizeMimeType(mimetype = '') {
   return normalized === 'image/jpg' ? 'image/jpeg' : normalized;
 }
 
-async function detectFileType(buffer) {
-  const { fileTypeFromBuffer } = await fileTypeModule;
-  return fileTypeFromBuffer(buffer);
+// Detects supported image formats using their actual file signatures.
+function detectFileType(buffer) {
+  if (!Buffer.isBuffer(buffer)) return null;
+
+  // JPEG signature: FF D8 FF
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return { mime: 'image/jpeg' };
+  }
+
+  // PNG signature
+  if (
+    buffer.length >= 8 &&
+    buffer.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    )
+  ) {
+    return { mime: 'image/png' };
+  }
+
+  // WebP signature: RIFF....WEBP
+  if (
+    buffer.length >= 12 &&
+    buffer.toString('ascii', 0, 4) === 'RIFF' &&
+    buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) {
+    return { mime: 'image/webp' };
+  }
+
+  return null;
 }
 
 function getPublicUrl(key) {
@@ -119,7 +149,7 @@ async function validateImageBuffer(file) {
     throw invalidImage();
   }
 
-  const detected = await detectFileType(file.buffer);
+  const detected = detectFileType(file.buffer);
 
   if (!detected || !IMAGE_FORMATS[detected.mime]) {
     throw invalidImage('The uploaded file is not a supported image.');
