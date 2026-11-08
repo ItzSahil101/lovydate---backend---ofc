@@ -1,4 +1,4 @@
-const { test, before, beforeEach, after } = require('node:test');
+﻿const { test, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -46,7 +46,7 @@ before(async () => {
   await db.exec(migration('001_initial_schema.sql').replace(/CREATE EXTENSION[^;]+;/g, ''));
   for (const file of ['002_profile_details.sql', '005_chat_attachments.sql',
     '006_privacy_settings.sql', '011_chat_message_actions.sql',
-    '012_soft_unmatch.sql']) {
+    '012_soft_unmatch.sql', '018_compatibility_answers.sql']) {
     await db.exec(migration(file));
   }
   await db.exec(migration('011_chat_message_actions.sql')); // migration is repeat-safe
@@ -80,7 +80,7 @@ test('reply targets must belong to this conversation and are returned with the r
 test('only members may read or mutate messages and only sender may unsend', async () => {
   const message = await chat.sendMessage(conversation, alice, { content: 'Private' });
   await assert.rejects(chat.listMessages(conversation, carol), { statusCode: 403 });
-  await assert.rejects(chat.reactToMessage(conversation, message.id, carol, { emoji: '❤️' }), { statusCode: 403 });
+  await assert.rejects(chat.reactToMessage(conversation, message.id, carol, { emoji: 'â¤ï¸' }), { statusCode: 403 });
   await assert.rejects(chat.deleteMessageForMe(conversation, message.id, carol), { statusCode: 403 });
   await assert.rejects(chat.unsendMessage(conversation, message.id, bob), { code: 'MESSAGE_NOT_OWNED' });
   assert.equal((await chatRepo.getMessage(conversation, message.id, alice)).content, 'Private');
@@ -88,9 +88,9 @@ test('only members may read or mutate messages and only sender may unsend', asyn
 
 test('reaction replacement, removal and validation persist for both participants', async () => {
   const message = await chat.sendMessage(conversation, alice, { content: 'Hello' });
-  await chat.reactToMessage(conversation, message.id, bob, { emoji: '❤️' });
-  const updated = await chat.reactToMessage(conversation, message.id, bob, { emoji: '🔥' });
-  assert.deepEqual(updated.reactions, [{ userId: bob, emoji: '🔥' }]);
+  await chat.reactToMessage(conversation, message.id, bob, { emoji: '\u2764\uFE0F' });
+  const updated = await chat.reactToMessage(conversation, message.id, bob, { emoji: '\u{1F525}' });
+  assert.deepEqual(updated.reactions, [{ userId: bob, emoji: '\u{1F525}' }]);
   assert.deepEqual((await chat.listMessages(conversation, alice)).items[0].reactions, updated.reactions);
   await assert.rejects(chat.reactToMessage(conversation, message.id, bob, { emoji: 'invalid' }), { code: 'INVALID_REACTION' });
   const removed = await chat.reactToMessage(conversation, message.id, bob, { emoji: '' });
@@ -114,7 +114,7 @@ test('unsend scrubs media, text, reactions, reply previews and conversation prev
     mimeType: 'image/jpeg', sizeBytes: 100,
   });
   const reply = await chat.sendMessage(conversation, bob, { content: 'Reply', replyToMessageId: image.id });
-  await chat.reactToMessage(conversation, image.id, bob, { emoji: '❤️' });
+  await chat.reactToMessage(conversation, image.id, bob, { emoji: '\u2764\uFE0F' });
   const unsent = await chat.unsendMessage(conversation, image.id, alice);
   assert.equal(unsent.isUnsent, true);
   assert.equal(unsent.content, '');
@@ -125,7 +125,7 @@ test('unsend scrubs media, text, reactions, reply previews and conversation prev
   assert.equal(quote.content, '');
   const stored = (await query('SELECT content, media_url FROM messages WHERE id = $1', [image.id])).rows[0];
   assert.deepEqual(stored, { content: '', media_url: null });
-  await assert.rejects(chat.reactToMessage(conversation, image.id, bob, { emoji: '❤️' }), { code: 'MESSAGE_UNSENT' });
+  await assert.rejects(chat.reactToMessage(conversation, image.id, bob, { emoji: 'â¤ï¸' }), { code: 'MESSAGE_UNSENT' });
   await assert.rejects(chat.sendMessage(conversation, bob, { content: 'Late reply', replyToMessageId: image.id }), { code: 'INVALID_REPLY_MESSAGE' });
   await chat.unsendMessage(conversation, reply.id, bob);
   assert.equal((await chat.listConversations(alice))[0].lastMessageContent, 'Message unsent');

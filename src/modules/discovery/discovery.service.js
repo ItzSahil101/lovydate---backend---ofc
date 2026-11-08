@@ -1,8 +1,9 @@
-const redis = require('../../infrastructure/redis/client');
+﻿const redis = require('../../infrastructure/redis/client');
 const { CACHE_KEYS, CACHE_TTL, DISCOVERY, QUEUE_NAMES } = require('../../config/constants');
 const { addJob } = require('../../infrastructure/queue/queueManager');
 const discoveryRepo = require('./discovery.repository');
 const profileRepo = require('../profiles/profile.repository');
+const compatibilityService = require('../compatibility/compatibility.service');
 const { encodeCursor, decodeCursor } = require('../../shared/cursor');
 
 async function generateCandidatePool(userId, filterOverrides = null) {
@@ -85,6 +86,11 @@ async function getDiscoveryFeed(userId, limit = DISCOVERY.DEFAULT_PAGE_SIZE, cur
       photos: p.photos && p.photos.length > 0 ? p.photos.map((ph) => ph.url || ph) : [],
       interests: p.interests && p.interests.length > 0 ? p.interests.map((i) => i.name || i) : [],
     }));
+
+  const compatibilityScores = await compatibilityService.getScoresForUsers(userId, pagedIds);
+  orderedProfiles.forEach((profile) => {
+    profile.compatibility = compatibilityScores[profile.id] || { isAvailable: false, reason: 'QUESTIONNAIRE_INCOMPLETE' };
+  });
 
   orderedProfiles.sort((a, b) => {
     if (a.distanceKm != null && b.distanceKm != null) {

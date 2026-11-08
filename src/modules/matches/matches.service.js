@@ -1,4 +1,5 @@
-const matchesRepo = require('./matches.repository');
+﻿const matchesRepo = require('./matches.repository');
+const compatibilityService = require('../compatibility/compatibility.service');
 const { encodeCursor, decodeCursor } = require('../../shared/cursor');
 const { NotFoundError } = require('../../shared/errors');
 const { isUuid } = require('../../shared/ids');
@@ -13,6 +14,15 @@ async function getMatches(userId, limit = 20, cursor = null) {
     decoded
   );
 
+  const compatibilityScores = await compatibilityService.getScoresForUsers(
+    userId,
+    items.map((item) => item.partnerUserId)
+  );
+  const enrichedItems = items.map((item) => ({
+    ...item,
+    compatibility: compatibilityScores[item.partnerUserId] || { isAvailable: false, reason: 'QUESTIONNAIRE_INCOMPLETE' },
+  }));
+
   let nextCursor = null;
   if (hasMore && items.length > 0) {
     const lastItem = items[items.length - 1];
@@ -23,7 +33,7 @@ async function getMatches(userId, limit = 20, cursor = null) {
   }
 
   return {
-    items,
+    items: enrichedItems,
     nextCursor,
     hasMore,
   };

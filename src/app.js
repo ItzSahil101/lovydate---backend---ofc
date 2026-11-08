@@ -10,6 +10,7 @@ const { errorHandler } = require('./middleware/errorHandler');
 const authRoutes = require('./modules/auth/auth.routes');
 const onboardingRoutes = require('./modules/onboarding/onboarding.routes');
 const interestsRoutes = require('./modules/interests/interests.routes');
+const compatibilityRoutes = require('./modules/compatibility/compatibility.routes');
 const profileRoutes = require('./modules/profiles/profile.routes');
 const discoveryRoutes = require('./modules/discovery/discovery.routes');
 const likesRoutes = require('./modules/likes/likes.routes');
@@ -67,6 +68,7 @@ app.get('/health/ready', async (req, res) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/onboarding', onboardingRoutes);
 app.use('/api/v1/interests', interestsRoutes);
+app.use('/api/v1/compatibility', compatibilityRoutes);
 app.use('/api/v1/profiles', profileRoutes);
 app.use('/api/v1/discovery', discoveryRoutes);
 // Keep the resource-specific paths used by the mobile client. The /users
