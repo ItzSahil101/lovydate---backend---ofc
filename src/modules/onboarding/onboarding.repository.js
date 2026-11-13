@@ -1,4 +1,7 @@
-const { query, withTransaction } = require('../../infrastructure/database/pool');
+const {
+  query,
+  withTransaction,
+} = require("../../infrastructure/database/pool");
 
 async function getProgress(userId) {
   const res = await query(
@@ -11,9 +14,24 @@ async function getProgress(userId) {
      LEFT JOIN profiles p ON p.user_id = u.id
      LEFT JOIN onboarding_progress op ON op.user_id = u.id
      WHERE u.id = $1`,
-    [userId]
+    [userId],
   );
   return res.rows[0] || null;
+}
+
+async function ensureProfile(userId, basicInfo) {
+  await query(
+    `INSERT INTO profiles (user_id, display_name, date_of_birth, gender, custom_gender)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [
+      userId,
+      basicInfo.displayName,
+      basicInfo.dateOfBirth,
+      basicInfo.gender,
+      basicInfo.customGender || null,
+    ],
+  );
 }
 
 async function updateProgress(userId, step, patchData) {
@@ -26,12 +44,15 @@ async function updateProgress(userId, step, patchData) {
        draft_data = onboarding_progress.draft_data || EXCLUDED.draft_data,
        updated_at = NOW()
      RETURNING user_id, step, draft_data`,
-    [userId, step, JSON.stringify(patchData)]
+    [userId, step, JSON.stringify(patchData)],
   );
   return res.rows[0];
 }
 
-async function updateUserLocation(userId, { latitude, longitude, city = null, countryCode = null }) {
+async function updateUserLocation(
+  userId,
+  { latitude, longitude, city = null, countryCode = null },
+) {
   await query(
     `INSERT INTO user_locations (user_id, latitude, longitude, city, country_code, updated_at)
      VALUES ($1, $2, $3, $4, $5, NOW())
@@ -42,7 +63,7 @@ async function updateUserLocation(userId, { latitude, longitude, city = null, co
        city = COALESCE(EXCLUDED.city, user_locations.city),
        country_code = COALESCE(EXCLUDED.country_code, user_locations.country_code),
        updated_at = NOW()`,
-    [userId, latitude, longitude, city, countryCode]
+    [userId, latitude, longitude, city, countryCode],
   );
   return { updated: true, latitude, longitude, city };
 }
@@ -85,7 +106,7 @@ async function completeOnboarding(userId, data) {
         data.about?.smoking || null,
         data.about?.drinking || null,
         data.about?.pets || null,
-      ]
+      ],
     );
 
     await client.query(
@@ -106,10 +127,14 @@ async function completeOnboarding(userId, data) {
         data.discovery?.maxAge || 60,
         data.discovery?.maxDistanceMeters || 50000,
         data.discovery?.allowOutsidePreferences ?? true,
-      ]
+      ],
     );
 
-    if (data.location && data.location.latitude != null && data.location.longitude != null) {
+    if (
+      data.location &&
+      data.location.latitude != null &&
+      data.location.longitude != null
+    ) {
       await client.query(
         `INSERT INTO user_locations (user_id, latitude, longitude, city, country_code, updated_at)
          VALUES ($1, $2, $3, $4, $5, NOW())
@@ -126,27 +151,31 @@ async function completeOnboarding(userId, data) {
           data.location.longitude,
           data.location.city || null,
           data.location.countryCode || null,
-        ]
+        ],
       );
     }
 
-    await client.query('DELETE FROM profile_photos WHERE user_id = $1', [userId]);
+    await client.query("DELETE FROM profile_photos WHERE user_id = $1", [
+      userId,
+    ]);
     for (let i = 0; i < data.photos.length; i++) {
       const photoUrl = data.photos[i];
       await client.query(
         `INSERT INTO profile_photos (user_id, url, display_order, is_primary)
          VALUES ($1, $2, $3, $4)`,
-        [userId, photoUrl, i, i === 0]
+        [userId, photoUrl, i, i === 0],
       );
     }
 
-    await client.query('DELETE FROM user_interests WHERE user_id = $1', [userId]);
+    await client.query("DELETE FROM user_interests WHERE user_id = $1", [
+      userId,
+    ]);
     for (const interestName of data.interests) {
       await client.query(
         `INSERT INTO user_interests (user_id, interest_id)
          SELECT $1, id FROM interests WHERE name = $2
          ON CONFLICT DO NOTHING`,
-        [userId, interestName]
+        [userId, interestName],
       );
     }
 
@@ -154,7 +183,7 @@ async function completeOnboarding(userId, data) {
       `UPDATE onboarding_progress
        SET step = 6, updated_at = NOW()
        WHERE user_id = $1`,
-      [userId]
+      [userId],
     );
 
     return { completed: true };
@@ -166,4 +195,5 @@ module.exports = {
   updateProgress,
   updateUserLocation,
   completeOnboarding,
+  ensureProfile,
 };
