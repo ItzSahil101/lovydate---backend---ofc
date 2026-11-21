@@ -22,7 +22,9 @@ module.exports = {
     refreshExpiresDays: parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS || '30', 10),
   },
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: (process.env.CORS_ORIGIN || '*')
+      .split(',')
+      .map(origin => origin.trim()),
   },
   s3: {
     endpoint: process.env.S3_ENDPOINT || 'https://minio.lovydate.fun',
