@@ -75,6 +75,38 @@ async function unsuspendUser(req, res, next) {
   }
 }
 
+
+async function banUser(req, res, next) {
+  try {
+    const { userId } = req.params;
+    const { reason, internalNote } = req.body;
+    const ipAddress = req.ip || req.connection.remoteAddress;
+
+    const result = await usersService.banUser({
+      userId, reason, internalNote, admin: req.admin, ipAddress,
+    });
+
+    res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function unbanUser(req, res, next) {
+  try {
+    const { userId } = req.params;
+    const { reason } = req.body;
+    const ipAddress = req.ip || req.connection.remoteAddress;
+
+    const result = await usersService.unbanUser({
+      userId, reason, admin: req.admin, ipAddress,
+    });
+
+    res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
 async function addRestriction(req, res, next) {
   try {
     const { userId } = req.params;
@@ -141,6 +173,8 @@ module.exports = {
   warnUser,
   suspendUser,
   unsuspendUser,
+  banUser,
+  unbanUser,
   addRestriction,
   removeRestriction,
   logoutAllSessions,

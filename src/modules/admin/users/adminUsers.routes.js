@@ -14,6 +14,8 @@ router.get('/:userId/moderation', requirePermission('users.read'), controller.ge
 router.post('/:userId/warn', requirePermission('users.warn'), controller.warnUser);
 router.post('/:userId/suspend', requirePermission('users.suspend'), controller.suspendUser);
 router.post('/:userId/unsuspend', requirePermission('users.suspend'), controller.unsuspendUser);
+router.post('/:userId/ban', requirePermission('users.suspend'), controller.banUser);
+router.post('/:userId/unban', requirePermission('users.suspend'), controller.unbanUser);
 router.post('/:userId/restrictions', requirePermission('users.restrict'), controller.addRestriction);
 router.delete('/:userId/restrictions/:restrictionId', requirePermission('users.restrict'), controller.removeRestriction);
 

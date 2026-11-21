@@ -23,7 +23,7 @@ async function expireStaleRestrictions(userId) {
          SELECT 1
          FROM user_restrictions
          WHERE user_id = $1
-           AND restriction_type = $2
+           AND restriction_type IN ($2, 'ACCOUNT_BAN')
            AND is_active = TRUE
            AND (expires_at IS NULL OR expires_at > NOW())
        )`,

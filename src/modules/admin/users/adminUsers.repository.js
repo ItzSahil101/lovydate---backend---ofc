@@ -1,4 +1,7 @@
-const { query, withTransaction } = require('../../../infrastructure/database/pool');
+const {
+  query,
+  withTransaction,
+} = require("../../../infrastructure/database/pool");
 
 async function listUsers({
   search,
@@ -6,7 +9,7 @@ async function listUsers({
   gender,
   onboardingCompleted,
   emailVerified,
-  sort = 'newest',
+  sort = "newest",
   limit = 25,
   cursor,
 }) {
@@ -33,11 +36,11 @@ async function listUsers({
 
   if (gender) {
     const g = gender.trim().toLowerCase();
-    if (g === 'male' || g === 'man' || g === 'men') {
+    if (g === "male" || g === "man" || g === "men") {
       conditions.push(`(LOWER(p.gender) IN ('male', 'man', 'men'))`);
-    } else if (g === 'female' || g === 'woman' || g === 'women') {
+    } else if (g === "female" || g === "woman" || g === "women") {
       conditions.push(`(LOWER(p.gender) IN ('female', 'woman', 'women'))`);
-    } else if (g === 'non_binary' || g === 'non-binary' || g === 'nonbinary') {
+    } else if (g === "non_binary" || g === "non-binary" || g === "nonbinary") {
       conditions.push(`(
         LOWER(COALESCE(p.gender, '')) NOT IN ('male', 'man', 'men', 'female', 'woman', 'women')
         OR LOWER(COALESCE(p.gender, '')) LIKE '%non%binary%'
@@ -45,38 +48,49 @@ async function listUsers({
       )`);
     } else {
       params.push(g);
-      conditions.push(`(LOWER(p.gender) = $${params.length} OR LOWER(COALESCE(p.custom_gender, '')) = $${params.length})`);
+      conditions.push(
+        `(LOWER(p.gender) = $${params.length} OR LOWER(COALESCE(p.custom_gender, '')) = $${params.length})`,
+      );
     }
   }
 
-  if (onboardingCompleted !== undefined && onboardingCompleted !== null && onboardingCompleted !== '') {
-    params.push(onboardingCompleted === 'true' || onboardingCompleted === true);
+  if (
+    onboardingCompleted !== undefined &&
+    onboardingCompleted !== null &&
+    onboardingCompleted !== ""
+  ) {
+    params.push(onboardingCompleted === "true" || onboardingCompleted === true);
     conditions.push(`p.onboarding_completed = $${params.length}`);
   }
 
-  if (emailVerified !== undefined && emailVerified !== null && emailVerified !== '') {
-    if (emailVerified === 'true' || emailVerified === true) {
+  if (
+    emailVerified !== undefined &&
+    emailVerified !== null &&
+    emailVerified !== ""
+  ) {
+    if (emailVerified === "true" || emailVerified === true) {
       conditions.push(`u.email_verified_at IS NOT NULL`);
     } else {
       conditions.push(`u.email_verified_at IS NULL`);
     }
   }
 
-  let orderClause = 'ORDER BY u.created_at DESC';
-  if (sort === 'oldest') {
-    orderClause = 'ORDER BY u.created_at ASC';
+  let orderClause = "ORDER BY u.created_at DESC";
+  if (sort === "oldest") {
+    orderClause = "ORDER BY u.created_at ASC";
     if (cursor) {
       params.push(cursor);
       conditions.push(`u.created_at > $${params.length}`);
     }
-  } else if (sort === 'recently_active') {
-    orderClause = 'ORDER BY p.last_active_at DESC NULLS LAST, u.created_at DESC';
+  } else if (sort === "recently_active") {
+    orderClause =
+      "ORDER BY p.last_active_at DESC NULLS LAST, u.created_at DESC";
     if (cursor) {
       params.push(cursor);
       conditions.push(`p.last_active_at < $${params.length}`);
     }
-  } else if (sort === 'most_reported') {
-    orderClause = 'ORDER BY report_count DESC, u.created_at DESC';
+  } else if (sort === "most_reported") {
+    orderClause = "ORDER BY report_count DESC, u.created_at DESC";
   } else {
     // default newest
     if (cursor) {
@@ -85,7 +99,8 @@ async function listUsers({
     }
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const pageLimit = Math.min(parseInt(limit, 10) || 25, 100);
   params.push(pageLimit + 1);
 
@@ -121,9 +136,12 @@ async function listUsers({
   const res = await query(sql, params);
   const hasMore = res.rows.length > pageLimit;
   const items = hasMore ? res.rows.slice(0, pageLimit) : res.rows;
-  const nextCursor = hasMore && items.length > 0
-    ? (sort === 'recently_active' ? items[items.length - 1].lastActiveAt : items[items.length - 1].createdAt)
-    : null;
+  const nextCursor =
+    hasMore && items.length > 0
+      ? sort === "recently_active"
+        ? items[items.length - 1].lastActiveAt
+        : items[items.length - 1].createdAt
+      : null;
 
   return {
     items,
@@ -147,7 +165,7 @@ async function getUserDetail(userId) {
      LEFT JOIN user_locations loc ON u.id = loc.user_id
      LEFT JOIN user_preferences pref ON u.id = pref.user_id
      WHERE u.id = $1`,
-    [userId]
+    [userId],
   );
 
   if (userRes.rows.length === 0) return null;
@@ -159,7 +177,7 @@ async function getUserDetail(userId) {
      FROM profile_photos
      WHERE user_id = $1
      ORDER BY display_order ASC, created_at ASC`,
-    [userId]
+    [userId],
   );
 
   // Interests
@@ -168,18 +186,39 @@ async function getUserDetail(userId) {
      FROM user_interests ui
      JOIN interests i ON ui.interest_id = i.id
      WHERE ui.user_id = $1`,
-    [userId]
+    [userId],
   );
 
   // Aggregate Stats
-  const [likesSentRes, likesRecRes, matchesRes, msgsRes, postsRes, repRecRes, repSubRes] = await Promise.all([
-    query(`SELECT COUNT(*) as count FROM likes WHERE source_user_id = $1`, [userId]),
-    query(`SELECT COUNT(*) as count FROM likes WHERE target_user_id = $1`, [userId]),
-    query(`SELECT COUNT(*) as count FROM matches WHERE user_one_id = $1 OR user_two_id = $1`, [userId]),
-    query(`SELECT COUNT(*) as count FROM messages WHERE sender_id = $1`, [userId]),
+  const [
+    likesSentRes,
+    likesRecRes,
+    matchesRes,
+    msgsRes,
+    postsRes,
+    repRecRes,
+    repSubRes,
+  ] = await Promise.all([
+    query(`SELECT COUNT(*) as count FROM likes WHERE source_user_id = $1`, [
+      userId,
+    ]),
+    query(`SELECT COUNT(*) as count FROM likes WHERE target_user_id = $1`, [
+      userId,
+    ]),
+    query(
+      `SELECT COUNT(*) as count FROM matches WHERE user_one_id = $1 OR user_two_id = $1`,
+      [userId],
+    ),
+    query(`SELECT COUNT(*) as count FROM messages WHERE sender_id = $1`, [
+      userId,
+    ]),
     query(`SELECT COUNT(*) as count FROM posts WHERE user_id = $1`, [userId]),
-    query(`SELECT COUNT(*) as count FROM reports WHERE reported_user_id = $1`, [userId]),
-    query(`SELECT COUNT(*) as count FROM reports WHERE reporter_user_id = $1`, [userId]),
+    query(`SELECT COUNT(*) as count FROM reports WHERE reported_user_id = $1`, [
+      userId,
+    ]),
+    query(`SELECT COUNT(*) as count FROM reports WHERE reporter_user_id = $1`, [
+      userId,
+    ]),
   ]);
 
   return {
@@ -205,30 +244,30 @@ async function getUserActivityTimeline(userId, limit = 30) {
   const warnings = await query(
     `SELECT id, 'warning' AS type, reason AS title, message AS description, created_at AS "createdAt"
      FROM user_warnings WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`,
-    [userId]
+    [userId],
   );
-  warnings.rows.forEach(w => timeline.push(w));
+  warnings.rows.forEach((w) => timeline.push(w));
 
   const restrictions = await query(
     `SELECT id, 'restriction' AS type, restriction_type AS title, reason AS description, created_at AS "createdAt"
      FROM user_restrictions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`,
-    [userId]
+    [userId],
   );
-  restrictions.rows.forEach(r => timeline.push(r));
+  restrictions.rows.forEach((r) => timeline.push(r));
 
   const posts = await query(
     `SELECT id, 'post_created' AS type, 'Feed Post' AS title, SUBSTRING(content FROM 1 FOR 60) AS description, created_at AS "createdAt"
      FROM posts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`,
-    [userId]
+    [userId],
   );
-  posts.rows.forEach(p => timeline.push(p));
+  posts.rows.forEach((p) => timeline.push(p));
 
   const matches = await query(
     `SELECT id, 'matched' AS type, 'New Match' AS title, 'Matched with another user' AS description, created_at AS "createdAt"
      FROM matches WHERE user_one_id = $1 OR user_two_id = $1 ORDER BY created_at DESC LIMIT 10`,
-    [userId]
+    [userId],
   );
-  matches.rows.forEach(m => timeline.push(m));
+  matches.rows.forEach((m) => timeline.push(m));
 
   timeline.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return timeline.slice(0, limit);
@@ -243,23 +282,23 @@ async function getUserModerationHistory(userId) {
        LEFT JOIN profiles p ON r.reporter_user_id = p.user_id
        WHERE r.reported_user_id = $1
        ORDER BY r.created_at DESC`,
-      [userId]
+      [userId],
     ),
     query(
       `SELECT id, reason, message, is_acknowledged AS "isAcknowledged", created_at AS "createdAt"
        FROM user_warnings WHERE user_id = $1 ORDER BY created_at DESC`,
-      [userId]
+      [userId],
     ),
     query(
       `SELECT id, restriction_type AS "restrictionType", reason, internal_note AS "internalNote",
               is_active AS "isActive", expires_at AS "expiresAt", created_at AS "createdAt"
        FROM user_restrictions WHERE user_id = $1 ORDER BY created_at DESC`,
-      [userId]
+      [userId],
     ),
     query(
       `SELECT id, appeal_type AS "appealType", reason, status, resolution_note AS "resolutionNote", created_at AS "createdAt"
        FROM moderation_appeals WHERE user_id = $1 ORDER BY created_at DESC`,
-      [userId]
+      [userId],
     ),
     query(
       `SELECT mn.id, mn.note, mn.created_at AS "createdAt", au.display_name AS "adminName"
@@ -267,7 +306,7 @@ async function getUserModerationHistory(userId) {
        LEFT JOIN admin_users au ON mn.admin_id = au.id
        WHERE mn.entity_type = 'user' AND mn.entity_id = $1
        ORDER BY mn.created_at DESC`,
-      [userId]
+      [userId],
     ),
   ]);
 
@@ -285,49 +324,165 @@ async function addWarning(userId, reason, message, adminId) {
     `INSERT INTO user_warnings (user_id, reason, message, admin_id)
      VALUES ($1, $2, $3, $4)
      RETURNING id, reason, message, created_at AS "createdAt"`,
-    [userId, reason, message, adminId]
+    [userId, reason, message, adminId],
   );
   return res.rows[0];
 }
 
-async function addRestriction(userId, restrictionType, reason, internalNote, expiresAt, adminId) {
-  const res = await query(
-    `INSERT INTO user_restrictions (user_id, restriction_type, reason, internal_note, expires_at, is_active, admin_id)
-     VALUES ($1, $2, $3, $4, $5, true, $6)
-     RETURNING id, restriction_type AS "restrictionType", reason, is_active AS "isActive", expires_at AS "expiresAt", created_at AS "createdAt"`,
-    [userId, restrictionType, reason, internalNote, expiresAt || null, adminId]
-  );
+async function addRestriction(
+  userId,
+  restrictionType,
+  reason,
+  internalNote,
+  expiresAt,
+  adminId,
+) {
+  return withTransaction(async (client) => {
+    const res = await client.query(
+      `INSERT INTO user_restrictions
+       (user_id, restriction_type, reason, internal_note, expires_at, is_active, admin_id)
+       VALUES ($1, $2, $3, $4, $5, TRUE, $6)
+       RETURNING id, restriction_type AS "restrictionType", reason,
+                 is_active AS "isActive", expires_at AS "expiresAt",
+                 created_at AS "createdAt"`,
+      [
+        userId,
+        restrictionType,
+        reason,
+        internalNote,
+        expiresAt || null,
+        adminId,
+      ],
+    );
 
-  if (restrictionType === 'ACCOUNT_SUSPENSION') {
-    await query(`UPDATE users SET status = 'suspended', updated_at = NOW() WHERE id = $1`, [userId]);
-  }
+    if (restrictionType === "ACCOUNT_SUSPENSION") {
+      await client.query(
+        `UPDATE users SET status = 'suspended', updated_at = NOW()
+         WHERE id = $1 AND status = 'active'`,
+        [userId],
+      );
+    }
 
-  return res.rows[0];
+    return res.rows[0];
+  });
 }
 
 async function removeRestriction(restrictionId, userId) {
-  await query(`UPDATE user_restrictions SET is_active = false, updated_at = NOW() WHERE id = $1`, [restrictionId]);
-  // Check if any active suspensions remain
-  const check = await query(
-    `SELECT 1 FROM user_restrictions WHERE user_id = $1 AND restriction_type = 'ACCOUNT_SUSPENSION' AND is_active = true`,
-    [userId]
-  );
-  if (check.rows.length === 0) {
-    await query(`UPDATE users SET status = 'active', updated_at = NOW() WHERE id = $1 AND status = 'suspended'`, [userId]);
-  }
+  return withTransaction(async (client) => {
+    const removed = await client.query(
+      `UPDATE user_restrictions
+       SET is_active = FALSE, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2 AND is_active = TRUE
+       RETURNING restriction_type`,
+      [restrictionId, userId],
+    );
+
+    if (removed.rows.length === 0) return;
+
+    if (removed.rows[0].restriction_type === "ACCOUNT_SUSPENSION") {
+      await client.query(
+        `UPDATE users SET status = 'active', updated_at = NOW()
+         WHERE id = $1 AND status = 'suspended'
+         AND NOT EXISTS (
+           SELECT 1 FROM user_restrictions
+           WHERE user_id = $1
+             AND restriction_type IN ('ACCOUNT_SUSPENSION', 'ACCOUNT_BAN')
+             AND is_active = TRUE
+             AND (expires_at IS NULL OR expires_at > NOW())
+         )`,
+        [userId],
+      );
+    }
+  });
 }
 
 async function unsuspendUser(userId) {
-  await query(
-    `UPDATE user_restrictions SET is_active = false, updated_at = NOW()
-     WHERE user_id = $1 AND restriction_type = 'ACCOUNT_SUSPENSION' AND is_active = true`,
-    [userId]
-  );
-  await query(`UPDATE users SET status = 'active', updated_at = NOW() WHERE id = $1`, [userId]);
+  return withTransaction(async (client) => {
+    await client.query(
+      `UPDATE user_restrictions
+       SET is_active = FALSE, updated_at = NOW()
+       WHERE user_id = $1
+         AND restriction_type = 'ACCOUNT_SUSPENSION'
+         AND is_active = TRUE`,
+      [userId],
+    );
+
+    await client.query(
+      `UPDATE users SET status = 'active', updated_at = NOW()
+       WHERE id = $1 AND status = 'suspended'
+       AND NOT EXISTS (
+         SELECT 1 FROM user_restrictions
+         WHERE user_id = $1
+           AND restriction_type = 'ACCOUNT_BAN'
+           AND is_active = TRUE
+           AND (expires_at IS NULL OR expires_at > NOW())
+       )`,
+      [userId],
+    );
+  });
+}
+
+async function banUser(userId, reason, internalNote, adminId) {
+  return withTransaction(async (client) => {
+    const res = await client.query(
+      `INSERT INTO user_restrictions
+       (user_id, restriction_type, reason, internal_note, expires_at, is_active, admin_id)
+       VALUES ($1, 'ACCOUNT_BAN', $2, $3, NULL, TRUE, $4)
+       RETURNING id, restriction_type AS "restrictionType", reason,
+                 is_active AS "isActive", expires_at AS "expiresAt",
+                 created_at AS "createdAt"`,
+      [userId, reason, internalNote || null, adminId],
+    );
+
+    await client.query(
+      `UPDATE users SET status = 'banned', auth_revoked_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [userId],
+    );
+
+    await client.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [
+      userId,
+    ]);
+
+    return res.rows[0];
+  });
+}
+
+async function unbanUser(userId) {
+  return withTransaction(async (client) => {
+    await client.query(
+      `UPDATE user_restrictions
+       SET is_active = FALSE, updated_at = NOW()
+       WHERE user_id = $1
+         AND restriction_type = 'ACCOUNT_BAN'
+         AND is_active = TRUE`,
+      [userId],
+    );
+
+    await client.query(
+      `UPDATE users
+       SET status = CASE
+         WHEN EXISTS (
+           SELECT 1 FROM user_restrictions
+           WHERE user_id = $1
+             AND restriction_type = 'ACCOUNT_SUSPENSION'
+             AND is_active = TRUE
+             AND (expires_at IS NULL OR expires_at > NOW())
+         ) THEN 'suspended'
+         ELSE 'active'
+       END,
+       updated_at = NOW()
+       WHERE id = $1 AND status = 'banned'`,
+      [userId],
+    );
+  });
 }
 
 async function deactivateUser(userId) {
-  await query(`UPDATE users SET status = 'deleted', updated_at = NOW() WHERE id = $1`, [userId]);
+  await query(
+    `UPDATE users SET status = 'deleted', updated_at = NOW() WHERE id = $1`,
+    [userId],
+  );
 }
 
 async function addModerationNote(entityType, entityId, note, adminId) {
@@ -335,14 +490,17 @@ async function addModerationNote(entityType, entityId, note, adminId) {
     `INSERT INTO moderation_notes (entity_type, entity_id, note, admin_id)
      VALUES ($1, $2, $3, $4)
      RETURNING id, note, created_at AS "createdAt"`,
-    [entityType, entityId, note, adminId]
+    [entityType, entityId, note, adminId],
   );
   return res.rows[0];
 }
 
 async function deleteUserRefreshTokens(userId) {
   await query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [userId]);
-  await query(`UPDATE users SET auth_revoked_at = NOW(), updated_at = NOW() WHERE id = $1`, [userId]);
+  await query(
+    `UPDATE users SET auth_revoked_at = NOW(), updated_at = NOW() WHERE id = $1`,
+    [userId],
+  );
 }
 
 module.exports = {
@@ -354,6 +512,8 @@ module.exports = {
   addRestriction,
   removeRestriction,
   unsuspendUser,
+  banUser,
+  unbanUser,
   deactivateUser,
   addModerationNote,
   deleteUserRefreshTokens,

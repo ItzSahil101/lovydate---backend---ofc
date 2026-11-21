@@ -114,6 +114,61 @@ async function unsuspendUser({ userId, reason, admin, ipAddress }) {
   return { success: true };
 }
 
+
+async function banUser({ userId, reason, internalNote, admin, ipAddress }) {
+  if (!reason || !reason.trim()) {
+    throw new BadRequestError('Reason is required to ban a user');
+  }
+
+  const user = await usersRepo.getUserDetail(userId);
+  if (!user) throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+  if (user.status === 'banned') throw new BadRequestError('User is already banned');
+  if (user.status === 'deleted') throw new BadRequestError('Cannot ban a deactivated account');
+
+  const restriction = await usersRepo.banUser(
+    userId, reason.trim(), internalNote, admin.id
+  );
+
+  await invalidateUserLists();
+
+  await logAudit({
+    adminId: admin.id,
+    adminEmail: admin.email,
+    action: 'USER_BANNED',
+    targetType: 'user',
+    targetId: userId,
+    reason: reason.trim(),
+    details: { internalNote, restrictionId: restriction.id },
+    ipAddress,
+  });
+
+  return restriction;
+}
+
+async function unbanUser({ userId, reason, admin, ipAddress }) {
+  if (!reason || !reason.trim()) {
+    throw new BadRequestError('Reason is required to unban a user');
+  }
+
+  const user = await usersRepo.getUserDetail(userId);
+  if (!user) throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+  if (user.status !== 'banned') throw new BadRequestError('User is not currently banned');
+
+  await usersRepo.unbanUser(userId);
+  await invalidateUserLists();
+
+  await logAudit({
+    adminId: admin.id,
+    adminEmail: admin.email,
+    action: 'USER_UNBANNED',
+    targetType: 'user',
+    targetId: userId,
+    reason: reason.trim(),
+    ipAddress,
+  });
+
+  return { success: true };
+}
 async function addRestriction({ userId, restrictionType, reason, internalNote, durationDays, admin, ipAddress }) {
   if (!restrictionType || !reason) throw new BadRequestError('Restriction type and reason are required');
   if (!ALLOWED_RESTRICTION_TYPES.has(restrictionType)) {
@@ -224,6 +279,8 @@ module.exports = {
   warnUser,
   suspendUser,
   unsuspendUser,
+  banUser,
+  unbanUser,
   addRestriction,
   removeRestriction,
   logoutAllSessions,
