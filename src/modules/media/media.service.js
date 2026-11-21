@@ -333,6 +333,75 @@ async function uploadFileToS3(file) {
 
   const optimizedFile = await optimizeImage(file);
 
+  // AI anti-nudity moderation (images only)
+  if (
+    optimizedFile.mimetype?.startsWith("image/") &&
+    process.env.MODERATION_ENABLED === "true"
+  ) {
+    const moderationUrl = process.env.MODERATION_URL;
+    const moderationKey = process.env.MODERATION_API_KEY;
+
+    if (!moderationUrl || !moderationKey) {
+      throw new AppError(
+        "Image moderation is not configured.",
+        503,
+        "MODERATION_UNAVAILABLE",
+      );
+    }
+
+    try {
+      const form = new FormData();
+
+      form.append(
+        "file",
+        new Blob([optimizedFile.buffer], {
+          type: optimizedFile.mimetype,
+        }),
+        optimizedFile.originalname || "upload.jpg",
+      );
+
+      const response = await fetch(
+        `${moderationUrl.replace(/\/+$/, "")}/v1/nudity/upload`,
+        {
+          method: "POST",
+          headers: {
+            "X-API-Key": moderationKey,
+          },
+          body: form,
+          signal: AbortSignal.timeout(30000),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Moderation service returned HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (typeof result.is_nude !== "boolean") {
+        throw new Error("Invalid moderation response");
+      }
+
+      if (result.is_nude) {
+        throw new AppError(
+          "This image cannot be uploaded because it may contain nudity.",
+          400,
+          "IMAGE_CONTENT_NOT_ALLOWED",
+        );
+      }
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+
+      console.error("[Moderation] Image analysis failed:", error.message);
+
+      throw new AppError(
+        "Image moderation is temporarily unavailable. Please try again.",
+        503,
+        "MODERATION_UNAVAILABLE",
+      );
+    }
+  }
+
   const ext =
     path.extname(optimizedFile.originalname || "").toLowerCase() || ".jpg";
 
