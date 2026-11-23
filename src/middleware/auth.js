@@ -13,6 +13,10 @@ function touchUserActivity(userId) {
   if (now - last > THROTTLE_MS) {
     lastActiveCache.set(userId, now);
     query('UPDATE profiles SET last_active_at = NOW() WHERE user_id = $1', [userId]).catch(() => {});
+    query(
+      'INSERT INTO user_daily_activity (user_id) VALUES ($1) ON CONFLICT (user_id, activity_date) DO NOTHING',
+      [userId]
+    ).catch(() => {});
     // Prevent memory leaks in long-running processes
     if (lastActiveCache.size > 10000) {
       const oldestKeys = Array.from(lastActiveCache.keys()).slice(0, 2000);

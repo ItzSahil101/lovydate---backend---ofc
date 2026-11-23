@@ -76,26 +76,52 @@ async function getAggregatedSummary(range = '7D') {
 }
 
 async function getChartSeries(period = '7D') {
-  let days = 7;
-  if (period === '24H') days = 1;
-  else if (period === '30D') days = 30;
+  const days = period === '24H' ? 1 : period === '30D' ? 30 : 7;
 
-  // Aggregate daily history from analytics_daily or time-bucketing
   const res = await query(`
-    SELECT d::date AS date,
-           COALESCE(ad.active_users, 0) AS "activeUsers",
-           COALESCE(ad.likes, 0) AS likes,
-           COALESCE(ad.matches, 0) AS matches,
-           COALESCE(ad.messages, 0) AS messages,
-           COALESCE(ad.new_users, 0) AS "newUsers"
-    FROM generate_series(
-      CURRENT_DATE - INTERVAL '${days - 1} days',
-      CURRENT_DATE,
-      '1 day'::interval
-    ) d
-    LEFT JOIN analytics_daily ad ON ad.date = d::date
-    ORDER BY d ASC
-  `);
+    WITH dates AS (
+      SELECT generate_series(
+        CURRENT_DATE - ($1::int - 1),
+        CURRENT_DATE,
+        '1 day'::interval
+      )::date AS date
+    ),
+    daily_activity AS (
+      SELECT activity_date AS date, COUNT(*)::int AS "activeUsers"
+      FROM user_daily_activity
+      WHERE activity_date >= CURRENT_DATE - ($1::int - 1)
+      GROUP BY activity_date
+    ),
+    daily_likes AS (
+      SELECT created_at::date AS date, COUNT(*)::int AS likes
+      FROM likes
+      WHERE created_at >= CURRENT_DATE - ($1::int - 1)
+      GROUP BY created_at::date
+    ),
+    daily_matches AS (
+      SELECT created_at::date AS date, COUNT(*)::int AS matches
+      FROM matches
+      WHERE created_at >= CURRENT_DATE - ($1::int - 1)
+      GROUP BY created_at::date
+    ),
+    daily_messages AS (
+      SELECT created_at::date AS date, COUNT(*)::int AS messages
+      FROM messages
+      WHERE created_at >= CURRENT_DATE - ($1::int - 1)
+      GROUP BY created_at::date
+    )
+    SELECT d.date,
+           COALESCE(a."activeUsers", 0)::int AS "activeUsers",
+           COALESCE(l.likes, 0)::int AS likes,
+           COALESCE(m.matches, 0)::int AS matches,
+           COALESCE(msg.messages, 0)::int AS messages
+    FROM dates d
+    LEFT JOIN daily_activity a ON a.date = d.date
+    LEFT JOIN daily_likes l ON l.date = d.date
+    LEFT JOIN daily_matches m ON m.date = d.date
+    LEFT JOIN daily_messages msg ON msg.date = d.date
+    ORDER BY d.date ASC
+  `, [days]);
 
   return res.rows;
 }
