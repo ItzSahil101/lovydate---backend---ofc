@@ -1,4 +1,4 @@
-﻿-- LovyDate Stories
+-- LovyDate Stories
 -- Story media is stored in S3; PostgreSQL stores metadata and relationships.
 
 CREATE TABLE IF NOT EXISTS stories (
