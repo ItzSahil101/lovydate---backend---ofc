@@ -1,4 +1,4 @@
-﻿-- Reliable cleanup tracking for deleted and expired story media.
+-- Reliable cleanup tracking for deleted and expired story media.
 
 ALTER TABLE stories
     ADD COLUMN IF NOT EXISTS media_deleted_at TIMESTAMPTZ,
