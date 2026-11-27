@@ -39,4 +39,9 @@ module.exports = {
   media: {
     publicUrl: process.env.PUBLIC_MEDIA_URL || `${process.env.PUBLIC_URL || 'https://server.lovydate.fun'}/api/v1/media`,
   },
+  moderation: {
+    enabled: process.env.MODERATION_ENABLED === 'true',
+    url: process.env.MODERATION_URL || '',
+    apiKey: process.env.MODERATION_API_KEY || '',
+  },
 };

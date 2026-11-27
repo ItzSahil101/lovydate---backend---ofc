@@ -1,7 +1,7 @@
 const path = require("path");
 const sharp = require("sharp");
 const { v4: uuidv4 } = require("uuid");
-const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { s3Client } = require("../../infrastructure/s3/client");
 const env = require("../../config/env");
 const { AppError } = require("../../shared/errors");
@@ -103,6 +103,14 @@ function getPublicUrl(key) {
   }
 
   return `https://server.lovydate.fun/api/v1/media/${key}`;
+}
+
+function getPrivateUrl(key) {
+  const base = (
+    env.media?.publicUrl || "https://server.lovydate.fun/api/v1/media"
+  ).replace(/\/+$/, "");
+
+  return `${base}/private/${encodeURIComponent(key)}`;
 }
 
 function getMediaKind(mimetype = "") {
@@ -297,7 +305,7 @@ async function optimizeImage(file) {
   }
 }
 
-async function getFileFromS3(key) {
+async function getFileFromS3(key, range = null) {
   if (!env.s3.configured) {
     throw new AppError(
       "Media storage is not configured.",
@@ -306,9 +314,18 @@ async function getFileFromS3(key) {
     );
   }
 
+  if (range && !/^bytes=\d+-\d*$/.test(range)) {
+    throw new AppError(
+      "Invalid video byte range.",
+      416,
+      "INVALID_BYTE_RANGE",
+    );
+  }
+
   const command = new GetObjectCommand({
     Bucket: env.s3.bucket,
     Key: key,
+    ...(range ? { Range: range } : {}),
   });
 
   const response = await s3Client.send(command);
@@ -317,12 +334,29 @@ async function getFileFromS3(key) {
     stream: response.Body,
     contentType: response.ContentType,
     contentLength: response.ContentLength,
+    contentRange: response.ContentRange,
+    acceptRanges: response.AcceptRanges,
     eTag: response.ETag,
     lastModified: response.LastModified,
   };
 }
 
-async function uploadFileToS3(file) {
+
+async function deleteStoryMedia(key) {
+  if (!env.s3.configured) {
+    throw new AppError("Media storage is not configured.", 503, "MEDIA_STORAGE_UNAVAILABLE");
+  }
+
+  if (typeof key !== "string" || !/^stories\/[a-f0-9-]+\.[a-z0-9]+$/i.test(key)) {
+    throw new AppError("Invalid story media key.", 400, "INVALID_MEDIA_KEY");
+  }
+
+  await s3Client.send(new DeleteObjectCommand({
+    Bucket: env.s3.bucket,
+    Key: key,
+  }));
+}
+async function uploadFileToS3(file, options = {}) {
   if (!env.s3.configured) {
     throw new AppError(
       "Media storage is not configured.",
@@ -336,10 +370,10 @@ async function uploadFileToS3(file) {
   // AI anti-nudity moderation (images only)
   if (
     optimizedFile.mimetype?.startsWith("image/") &&
-    process.env.MODERATION_ENABLED === "true"
+    (env.moderation.enabled || (env.isProduction && options.story))
   ) {
-    const moderationUrl = process.env.MODERATION_URL;
-    const moderationKey = process.env.MODERATION_API_KEY;
+    const moderationUrl = env.moderation.url;
+    const moderationKey = env.moderation.apiKey;
 
     if (!moderationUrl || !moderationKey) {
       throw new AppError(
@@ -405,7 +439,9 @@ async function uploadFileToS3(file) {
   const ext =
     path.extname(optimizedFile.originalname || "").toLowerCase() || ".jpg";
 
-  const key = `${uuidv4()}${ext}`;
+  const key = options.story
+    ? `stories/${uuidv4()}${ext}`
+    : `${options.private ? "chat-" : ""}${uuidv4()}${ext}`;
 
   try {
     const command = new PutObjectCommand({
@@ -431,7 +467,11 @@ async function uploadFileToS3(file) {
 
   return {
     key,
-    url: getPublicUrl(key),
+    url: options.story
+      ? null
+      : options.private
+        ? getPrivateUrl(key)
+        : getPublicUrl(key),
     size: optimizedFile.size || optimizedFile.buffer.length,
     mimetype: optimizedFile.mimetype,
   };
@@ -439,10 +479,14 @@ async function uploadFileToS3(file) {
 
 module.exports = {
   uploadFileToS3,
+  deleteStoryMedia,
   getFileFromS3,
   getPublicUrl,
   getMediaKind,
   isManagedMediaUrl,
   readMp4DurationSeconds,
+  getPrivateUrl,
   isS3Configured: () => env.s3.configured,
 };
+
+

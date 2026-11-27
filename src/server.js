@@ -1,4 +1,4 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 const http = require('http');
 const env = require('./config/env');
 const app = require('./app');
@@ -12,10 +12,12 @@ const profileService = require('./modules/profiles/profile.service');
 
 const { runMigrations } = require('./infrastructure/database/migrate');
 const { preloadAdminCache } = require('./modules/admin/adminCacheWarmup');
+const { startStoryMediaCleanupWorker } = require('./modules/stories/stories.cleanup.worker');
 
 const server = http.createServer(app);
 
 let workers = {};
+let storyCleanupWorker = null;
 
 async function startServer() {
   try {
@@ -25,6 +27,10 @@ async function startServer() {
     workers = initWorkers({
       discoveryService,
       profileService,
+    });
+    storyCleanupWorker = startStoryMediaCleanupWorker({
+      intervalMs: 60000,
+      batchSize: 20,
     });
   } catch (e) {
     console.error('Server startup aborted because migrations failed:', e.message);
@@ -60,6 +66,15 @@ async function gracefulShutdown(signal) {
   }
 
   try {
+    if (storyCleanupWorker) {
+      await storyCleanupWorker.close();
+      storyCleanupWorker = null;
+    }
+  } catch (err) {
+    console.error('Error closing Stories cleanup worker:', err);
+  }
+
+  try {
     await closeSocketRedis();
     console.log('Socket.IO Redis adapter connections closed.');
   } catch (err) {
@@ -87,3 +102,6 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = server;
+
+
+

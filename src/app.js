@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -21,6 +21,7 @@ const reportsRoutes = require('./modules/reports/reports.routes');
 const bootstrapRoutes = require('./modules/bootstrap/bootstrap.routes');
 const mediaRoutes = require('./modules/media/media.routes');
 const feedRoutes = require('./modules/feed/feed.routes');
+const storiesRoutes = require('./modules/stories/stories.routes');
 const notificationsRoutes = require('./modules/notifications/notifications.routes');
 
 const app = express();
@@ -85,6 +86,7 @@ app.use('/api/v1/conversations', chatRoutes);
 app.use('/api/v1/bootstrap', bootstrapRoutes);
 app.use('/api/v1/media', mediaRoutes);
 app.use('/api/v1/feed', feedRoutes);
+app.use('/api/v1/stories', storiesRoutes);
 app.use('/api/v1/notifications', notificationsRoutes);
 const supportRoutes = require('./modules/support/support.routes');
 app.use('/api/v1/support', supportRoutes);
@@ -109,3 +111,4 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 module.exports = app;
+
