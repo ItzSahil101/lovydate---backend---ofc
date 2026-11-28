@@ -7,8 +7,7 @@ const STORY_ACCESS_SQL = `
   AND (
     s.user_id = $1
     OR (
-      s.moderation_status = 'approved'
-      AND NOT EXISTS (
+      NOT EXISTS (
         SELECT 1
         FROM blocks b
         WHERE (b.blocker_user_id = $1 AND b.blocked_user_id = s.user_id)
@@ -98,7 +97,7 @@ async function createStory(userId, data, allowedViewerIds = []) {
          media_size_bytes, duration_seconds, caption,
          visibility, moderation_status
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'approved')
        RETURNING
          id, user_id AS "userId", media_key AS "mediaKey",
          media_type AS "mediaType", mime_type AS "mimeType",
